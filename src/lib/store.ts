@@ -1,26 +1,13 @@
 import { supabase } from './supabase';
-import type {
-  Client,
-  Practitioner,
-  CheckIn,
-  Symptom,
-  SymptomEntry,
-  ContactRequest,
-  FollowUpReport,
-  SymptomChange,
-  ComplianceMetrics,
-} from '../types/database';
+import type { Client, Practitioner, CheckIn } from '../types/database';
 
-export function getPractitionerDisplayName(p: Practitioner): string {
-  return p.full_name || p.name;
+export async function getClients(): Promise<Client[]> {
+  const { data } = await supabase.from('clients').select('*').order('full_name');
+  return (data as Client[]) ?? [];
 }
 
-export async function getPractitionerByCode(code: string): Promise<Practitioner | null> {
-  const { data } = await supabase
-    .from('practitioners')
-    .select('*')
-    .eq('login_code', code.trim())
-    .maybeSingle();
+export async function getClient(id: string): Promise<Client | null> {
+  const { data } = await supabase.from('clients').select('*').eq('id', id).maybeSingle();
   return data ?? null;
 }
 
@@ -28,25 +15,40 @@ export async function getClientByCode(code: string): Promise<Client | null> {
   const { data } = await supabase
     .from('clients')
     .select('*')
-    .eq('login_code', code.trim())
+    .eq('login_code', code)
     .maybeSingle();
   return data ?? null;
 }
 
-export async function getClient(clientId: string): Promise<Client | null> {
+export async function createClient(
+  clientData: Omit<Client, 'id' | 'created_at' | 'updated_at'>
+): Promise<Client | null> {
   const { data } = await supabase
     .from('clients')
-    .select('*')
-    .eq('id', clientId)
+    .insert(clientData)
+    .select()
     .maybeSingle();
   return data ?? null;
 }
 
-export async function getPractitioner(practitionerId: string): Promise<Practitioner | null> {
+export async function updateClient(
+  id: string,
+  updates: Partial<Omit<Client, 'id' | 'created_at'>>
+): Promise<Client | null> {
+  const { data } = await supabase
+    .from('clients')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .maybeSingle();
+  return data ?? null;
+}
+
+export async function getPractitioner(id: string): Promise<Practitioner | null> {
   const { data } = await supabase
     .from('practitioners')
     .select('*')
-    .eq('id', practitionerId)
+    .eq('id', id)
     .maybeSingle();
   return data ?? null;
 }
@@ -55,143 +57,48 @@ export async function getPractitioners(): Promise<Practitioner[]> {
   const { data } = await supabase
     .from('practitioners')
     .select('*')
-    .order('name');
-  return data ?? [];
+    .order('full_name');
+  return (data as Practitioner[]) ?? [];
 }
 
-export async function getClients(practitionerId?: string): Promise<Client[]> {
-  let query = supabase.from('clients').select('*').order('full_name');
-  if (practitionerId) {
-    query = query.eq('practitioner_id', practitionerId);
+export async function getPractitionerByCode(code: string): Promise<Practitioner | null> {
+  const { data } = await supabase
+    .from('practitioners')
+    .select('*')
+    .eq('login_code', code)
+    .maybeSingle();
+  return data ?? null;
+}
+
+export function getPractitionerDisplayName(p: Practitioner): string {
+  return p.full_name || p.name || 'Unknown';
+}
+
+export async function getCheckIns(
+  clientId?: string,
+  limit = 50
+): Promise<CheckIn[]> {
+  let query = supabase
+    .from('check_ins')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (clientId) {
+    query = query.eq('client_id', clientId);
   }
   const { data } = await query;
-  return data ?? [];
+  return (data as CheckIn[]) ?? [];
 }
 
-export async function getLastCheckInDates(clientIds: string[]): Promise<Record<string, string>> {
-  if (clientIds.length === 0) return {};
+export async function createCheckIn(
+  checkIn: Omit<CheckIn, 'id' | 'created_at'>
+): Promise<CheckIn | null> {
   const { data } = await supabase
     .from('check_ins')
-    .select('client_id, created_at')
-    .in('client_id', clientIds)
-    .order('created_at', { ascending: false });
-  const map: Record<string, string> = {};
-  for (const row of data ?? []) {
-    if (!map[row.client_id]) map[row.client_id] = row.created_at;
-  }
-  return map;
-}
-
-export async function updateClient(
-  clientId: string,
-  updates: Partial<Client>
-): Promise<Client | null> {
-  const { data } = await supabase
-    .from('clients')
-    .update(updates)
-    .eq('id', clientId)
+    .insert(checkIn)
     .select()
     .maybeSingle();
   return data ?? null;
-}
-
-export async function createClient(payload: {
-  full_name: string;
-  email: string;
-  practitioner_id: string;
-  login_code: string;
-  primary_complaint: string;
-  notes?: string;
-  next_appointment?: string;
-  tracking_duration_weeks?: number;
-  tracking_end_date?: string;
-  check_in_frequency?: string;
-}): Promise<Client | null> {
-  const { data } = await supabase
-    .from('clients')
-    .insert(payload)
-    .select()
-    .maybeSingle();
-  return data ?? null;
-}
-
-export async function deleteClient(clientId: string): Promise<void> {
-  await supabase.from('clients').delete().eq('id', clientId);
-}
-
-export async function getCheckIns(clientId: string): Promise<CheckIn[]> {
-  const { data } = await supabase
-    .from('check_ins')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false });
-  return data ?? [];
-}
-
-export async function createCheckIn(payload: {
-  client_id: string;
-  overall_feeling: number;
-  symptom_change: string;
-  pain_level: number;
-  sleep_quality: number;
-  stress_level: number;
-  medication_taken: boolean;
-  notes?: string;
-  flagged?: boolean;
-}): Promise<CheckIn | null> {
-  const { data } = await supabase
-    .from('check_ins')
-    .insert({ ...payload, flagged: payload.flagged ?? false })
-    .select()
-    .maybeSingle();
-  return data ?? null;
-}
-
-export async function getSymptoms(clientId: string): Promise<Symptom[]> {
-  const { data } = await supabase
-    .from('symptoms')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('created_at');
-  return data ?? [];
-}
-
-export async function createSymptom(payload: {
-  client_id: string;
-  name: string;
-  body_area: string;
-}): Promise<Symptom | null> {
-  const { data } = await supabase
-    .from('symptoms')
-    .insert({ ...payload, active: true })
-    .select()
-    .maybeSingle();
-  return data ?? null;
-}
-
-export async function updateSymptom(
-  symptomId: string,
-  updates: Partial<Symptom>
-): Promise<void> {
-  await supabase.from('symptoms').update(updates).eq('id', symptomId);
-}
-
-export async function getSymptomEntriesBySymptom(symptomId: string): Promise<SymptomEntry[]> {
-  const { data } = await supabase
-    .from('symptom_entries')
-    .select('*')
-    .eq('symptom_id', symptomId)
-    .order('id');
-  return data ?? [];
-}
-
-export async function createSymptomEntry(payload: {
-  check_in_id: string;
-  symptom_id: string;
-  severity: number;
-  notes?: string;
-}): Promise<void> {
-  await supabase.from('symptom_entries').insert(payload);
 }
 
 export async function storeSymptomQuery(
@@ -230,14 +137,50 @@ export async function saveWebhookSettings(
   contactWebhookEnabled?: boolean
 ): Promise<void> {
   const existing = await getWebhookSettings(practitionerId);
-  const updates: Record<string, unknown> = { webhook_url: webhookUrl, enabled, updated_at: new Date().toISOString() };
-  if (contactWebhookUrl !== undefined) updates.contact_webhook_url = contactWebhookUrl;
-  if (contactWebhookEnabled !== undefined) updates.contact_webhook_enabled = contactWebhookEnabled;
+  const patch: Record<string, unknown> = {
+    webhook_url: webhookUrl,
+    enabled,
+    updated_at: new Date().toISOString(),
+  };
+  if (contactWebhookUrl !== undefined) patch.contact_webhook_url = contactWebhookUrl;
+  if (contactWebhookEnabled !== undefined) patch.contact_webhook_enabled = contactWebhookEnabled;
+
   if (existing) {
-    await supabase.from('webhook_settings').update(updates).eq('practitioner_id', practitionerId);
+    await supabase
+      .from('webhook_settings')
+      .update(patch)
+      .eq('practitioner_id', practitionerId);
   } else {
-    await supabase.from('webhook_settings').insert({ practitioner_id: practitionerId, ...updates });
+    await supabase
+      .from('webhook_settings')
+      .insert({ practitioner_id: practitionerId, ...patch });
   }
+}
+
+export async function fireContactProfessionalWebhook(
+  practitionerId: string,
+  clientName: string,
+  symptomDescription: string,
+  symptomScore: number
+): Promise<void> {
+  const settings = await getWebhookSettings(practitionerId);
+  const webhookUrl = settings?.contact_webhook_url?.trim();
+  if (!webhookUrl || !settings?.contact_webhook_enabled) return;
+
+  await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'contact_professional',
+      client_name: clientName,
+      symptom_description: symptomDescription,
+      symptom_score: symptomScore,
+      practitioner_id: practitionerId,
+      timestamp: new Date().toISOString(),
+    }),
+  }).catch(() => {
+    // fire-and-forget — do not surface webhook errors to the client
+  });
 }
 
 export async function createContactRequest(
@@ -253,202 +196,234 @@ export async function createContactRequest(
     practitioner_id: practitionerId,
     symptom_description: symptomDescription,
     symptom_score: symptomScore,
-    is_read: false,
+    client_name: clientName,
+    red_flag_detected: redFlagDetected ?? false,
   });
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/send-contact-webhook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${supabaseAnonKey}`,
-      },
-      body: JSON.stringify({
-        practitioner_id: practitionerId,
-        client_id: clientId,
-        client_name: clientName ?? 'Client',
-        symptom_description: symptomDescription,
-        symptom_score: symptomScore,
-        red_flag_detected: redFlagDetected ?? false,
-      }),
-    });
-  } catch {
-    // webhook failure is non-blocking
+  const webhookSettings = await getWebhookSettings(practitionerId);
+  if (webhookSettings?.webhook_url && webhookSettings.enabled) {
+    try {
+      await fetch(webhookSettings.webhook_url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'contact_request',
+          client_id: clientId,
+          practitioner_id: practitionerId,
+          client_name: clientName,
+          symptom_description: symptomDescription,
+          symptom_score: symptomScore,
+          red_flag_detected: redFlagDetected ?? false,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    } catch {
+      // webhook failures are non-blocking
+    }
   }
 }
 
-export async function getContactRequests(practitionerId: string): Promise<ContactRequest[]> {
-  const { data } = await supabase
+export async function getContactRequests(practitionerId?: string) {
+  let query = supabase
     .from('contact_requests')
-    .select('*, clients(full_name, primary_complaint)')
-    .eq('practitioner_id', practitionerId)
-    .order('created_at', { ascending: false });
-  return (data as ContactRequest[]) ?? [];
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (practitionerId) {
+    query = query.eq('practitioner_id', practitionerId);
+  }
+  const { data } = await query;
+  return data ?? [];
 }
 
-export async function getAllContactRequests(): Promise<ContactRequest[]> {
-  const { data } = await supabase
-    .from('contact_requests')
-    .select('*, clients(full_name, primary_complaint)')
-    .order('created_at', { ascending: false });
-  return (data as ContactRequest[]) ?? [];
+export async function markContactRequestRead(id: string): Promise<void> {
+  await supabase.from('contact_requests').update({ read: true }).eq('id', id);
 }
 
-export async function markContactRequestRead(requestId: string): Promise<void> {
-  await supabase
-    .from('contact_requests')
-    .update({ is_read: true, responded_at: new Date().toISOString() })
-    .eq('id', requestId);
+export async function getAlerts(practitionerId?: string) {
+  let query = supabase
+    .from('alerts')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (practitionerId) {
+    query = query.eq('practitioner_id', practitionerId);
+  }
+  const { data } = await query;
+  return data ?? [];
 }
 
-function calculateComplianceMetrics(checkIns: CheckIn[], trackingWeeks = 8): ComplianceMetrics {
-  const total = checkIns.length;
-  if (total === 0) return { frequency: 0, engagement: 0, variability: 0, recency: 0, overall: 0 };
-
-  const sorted = [...checkIns].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-  const expectedTotal = trackingWeeks * 7;
-  const frequency = Math.min(100, Math.round((total / expectedTotal) * 100));
-
-  const engagementScores = checkIns.map((ci) => {
-    let score = 0;
-    if (ci.notes && ci.notes.trim().length > 10) score += 40;
-    else if (ci.notes && ci.notes.trim().length > 0) score += 20;
-    if (ci.medication_taken) score += 20;
-    score += 40;
-    return score;
-  });
-  const engagement = Math.round(engagementScores.reduce((a, b) => a + b, 0) / total);
-
-  let variability = 0;
-  if (total >= 3) {
-    const painValues = sorted.map((c) => c.pain_level);
-    const mean = painValues.reduce((a, b) => a + b, 0) / painValues.length;
-    const variance = painValues.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / painValues.length;
-    const stdDev = Math.sqrt(variance);
-    if (stdDev < 0.5) variability = 100;
-    else if (stdDev < 1.5) variability = 85;
-    else if (stdDev < 2.5) variability = 70;
-    else if (stdDev < 3.5) variability = 50;
-    else variability = 30;
-  } else {
-    variability = 50;
-  }
-
-  const now = Date.now();
-  const lastCheckIn = new Date(sorted[sorted.length - 1].created_at).getTime();
-  const daysSinceLast = (now - lastCheckIn) / (1000 * 60 * 60 * 24);
-  let recency: number;
-  if (daysSinceLast <= 1) recency = 100;
-  else if (daysSinceLast <= 3) recency = 85;
-  else if (daysSinceLast <= 7) recency = 65;
-  else if (daysSinceLast <= 14) recency = 40;
-  else recency = 15;
-
-  const overall = Math.round(frequency * 0.35 + engagement * 0.25 + variability * 0.2 + recency * 0.2);
-
-  return {
-    frequency,
-    engagement,
-    variability,
-    recency,
-    overall,
-  };
+export async function markAlertRead(id: string): Promise<void> {
+  await supabase.from('alerts').update({ read: true }).eq('id', id);
 }
 
-function generateRecommendations(
-  overallTrend: 'improving' | 'declining' | 'stable',
-  avgPain: number,
-  avgSleep: number,
-  avgStress: number,
-  flagCount: number,
-  compliance: ComplianceMetrics
-): string[] {
-  const recs: string[] = [];
+export type AnalyticsSummary = {
+  totalClients: number;
+  totalCheckIns: number;
+  avgPain: number;
+  avgSleep: number;
+  avgStress: number;
+  redFlagCount: number;
+  checkInsThisWeek: number;
+  improvingCount: number;
+  worseningCount: number;
+};
 
-  if (overallTrend === 'declining') {
-    recs.push('Pain levels are trending upward — consider reviewing the current treatment plan.');
-  } else if (overallTrend === 'improving') {
-    recs.push('Good progress — pain levels are trending downward. Continue current approach.');
+export async function getAnalyticsSummary(
+  practitionerId?: string
+): Promise<AnalyticsSummary> {
+  const clients = practitionerId
+    ? (await supabase.from('clients').select('id').eq('practitioner_id', practitionerId)).data ?? []
+    : (await supabase.from('clients').select('id')).data ?? [];
+
+  const clientIds = clients.map((c: { id: string }) => c.id);
+  const totalClients = clientIds.length;
+
+  if (totalClients === 0) {
+    return {
+      totalClients: 0,
+      totalCheckIns: 0,
+      avgPain: 0,
+      avgSleep: 0,
+      avgStress: 0,
+      redFlagCount: 0,
+      checkInsThisWeek: 0,
+      improvingCount: 0,
+      worseningCount: 0,
+    };
   }
 
-  if (avgPain >= 7) {
-    recs.push('High average pain levels reported. Consider pain management strategies or specialist referral.');
-  }
+  const { data: checkIns } = await supabase
+    .from('check_ins')
+    .select('*')
+    .in('client_id', clientIds)
+    .order('created_at', { ascending: false })
+    .limit(1000);
 
-  if (avgSleep <= 2.5) {
-    recs.push('Poor sleep quality reported. Address sleep hygiene or refer to a sleep specialist.');
-  }
+  const all = (checkIns as CheckIn[]) ?? [];
+  const totalCheckIns = all.length;
 
-  if (avgStress >= 4) {
-    recs.push('Elevated stress levels detected. Consider relaxation techniques or psychological support.');
-  }
+  const avgPain = all.length
+    ? all.reduce((s, c) => s + (c.pain_level ?? 0), 0) / all.length
+    : 0;
+  const avgSleep = all.length
+    ? all.reduce((s, c) => s + (c.sleep_quality ?? 0), 0) / all.length
+    : 0;
+  const avgStress = all.length
+    ? all.reduce((s, c) => s + (c.stress_level ?? 0), 0) / all.length
+    : 0;
 
-  if (flagCount > 0) {
-    recs.push(`${flagCount} red-flag check-in${flagCount > 1 ? 's' : ''} recorded — review flagged entries urgently.`);
-  }
+  const redFlagCount = all.filter((c) => c.red_flag).length;
 
-  if (compliance.frequency < 50) {
-    recs.push('Low check-in frequency. Encourage the client to complete daily check-ins for better monitoring.');
-  }
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  const checkInsThisWeek = all.filter(
+    (c) => new Date(c.created_at) >= oneWeekAgo
+  ).length;
 
-  if (compliance.recency < 40) {
-    recs.push('No recent check-ins detected. Follow up with the client to re-engage with tracking.');
-  }
-
-  if (recs.length === 0) {
-    recs.push('Client is progressing well. Continue monitoring and maintain current plan.');
-  }
-
-  return recs;
-}
-
-export async function generateReport(clientId: string, client?: Client): Promise<FollowUpReport | null> {
-  const checkIns = await getCheckIns(clientId);
-  if (checkIns.length === 0) return null;
-
-  const sorted = [...checkIns].reverse();
-  const total = sorted.length;
-
-  const avgPain = sorted.reduce((s, c) => s + c.pain_level, 0) / total;
-  const avgSleep = sorted.reduce((s, c) => s + c.sleep_quality, 0) / total;
-  const avgStress = sorted.reduce((s, c) => s + c.stress_level, 0) / total;
-  const painTrend = sorted.map((c) => c.pain_level);
-  const flagCount = sorted.filter((c) => c.flagged).length;
-
-  let overallTrend: 'improving' | 'declining' | 'stable' = 'stable';
-  if (total >= 3) {
-    const first = painTrend.slice(0, Math.floor(total / 2));
-    const last = painTrend.slice(Math.ceil(total / 2));
-    const firstAvg = first.reduce((a, b) => a + b, 0) / first.length;
-    const lastAvg = last.reduce((a, b) => a + b, 0) / last.length;
-    if (lastAvg < firstAvg - 0.5) overallTrend = 'improving';
-    else if (lastAvg > firstAvg + 0.5) overallTrend = 'declining';
-  }
-
-  const symptoms = await getSymptoms(clientId);
-  const symptomChanges: SymptomChange[] = [];
-  for (const sym of symptoms.filter((s) => s.active)) {
-    const entries = await getSymptomEntriesBySymptom(sym.id);
-    if (entries.length >= 2) {
-      const start = entries[0].severity;
-      const end = entries[entries.length - 1].severity;
-      const trend: 'improving' | 'declining' | 'stable' =
-        end < start - 0.5 ? 'improving' : end > start + 0.5 ? 'declining' : 'stable';
-      symptomChanges.push({ symptom_name: sym.name, start_severity: start, end_severity: end, trend });
+  let improvingCount = 0;
+  let worseningCount = 0;
+  for (const clientId of clientIds) {
+    const clientCIs = all
+      .filter((c) => c.client_id === clientId)
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      .slice(0, 5);
+    if (clientCIs.length >= 2) {
+      const recent = clientCIs.slice(0, 2).reduce((s, c) => s + (c.pain_level ?? 0), 0) / 2;
+      const older = clientCIs.slice(2).reduce((s, c) => s + (c.pain_level ?? 0), 0) / Math.max(clientCIs.slice(2).length, 1);
+      if (recent < older - 0.5) improvingCount++;
+      else if (recent > older + 0.5) worseningCount++;
     }
   }
 
-  const trackingWeeks = client?.tracking_duration_weeks ?? 8;
-  const complianceMetrics = calculateComplianceMetrics(checkIns, trackingWeeks);
-  const recommendations = generateRecommendations(overallTrend, avgPain, avgSleep, avgStress, flagCount, complianceMetrics);
+  return {
+    totalClients,
+    totalCheckIns,
+    avgPain: Math.round(avgPain * 10) / 10,
+    avgSleep: Math.round(avgSleep * 10) / 10,
+    avgStress: Math.round(avgStress * 10) / 10,
+    redFlagCount,
+    checkInsThisWeek,
+    improvingCount,
+    worseningCount,
+  };
+}
+
+export type ClientReport = {
+  client: Client;
+  checkIns: CheckIn[];
+  summary: {
+    overall_trend: 'improving' | 'stable' | 'worsening' | 'insufficient_data';
+    avg_pain_level: number;
+    avg_sleep_quality: number;
+    avg_stress_level: number;
+    pain_trend: 'improving' | 'stable' | 'worsening' | 'insufficient_data';
+    symptom_changes: string[];
+    flag_count: number;
+    recommendations: string[];
+  };
+};
+
+export async function getClientReport(clientId: string): Promise<ClientReport | null> {
+  const client = await getClient(clientId);
+  if (!client) return null;
+
+  const checkIns = await getCheckIns(clientId, 30);
+
+  if (checkIns.length === 0) {
+    return {
+      client,
+      checkIns,
+      summary: {
+        overall_trend: 'insufficient_data',
+        avg_pain_level: 0,
+        avg_sleep_quality: 0,
+        avg_stress_level: 0,
+        pain_trend: 'insufficient_data',
+        symptom_changes: [],
+        flag_count: 0,
+        recommendations: ['Not enough check-in data to generate a report.'],
+      },
+    };
+  }
+
+  const avgPain = checkIns.reduce((s, c) => s + (c.pain_level ?? 0), 0) / checkIns.length;
+  const avgSleep = checkIns.reduce((s, c) => s + (c.sleep_quality ?? 0), 0) / checkIns.length;
+  const avgStress = checkIns.reduce((s, c) => s + (c.stress_level ?? 0), 0) / checkIns.length;
+  const flagCount = checkIns.filter((c) => c.red_flag).length;
+
+  const recent = checkIns.slice(0, Math.ceil(checkIns.length / 2));
+  const older = checkIns.slice(Math.ceil(checkIns.length / 2));
+  const recentPain = recent.reduce((s, c) => s + (c.pain_level ?? 0), 0) / recent.length;
+  const olderPain = older.length
+    ? older.reduce((s, c) => s + (c.pain_level ?? 0), 0) / older.length
+    : recentPain;
+
+  let painTrend: 'improving' | 'stable' | 'worsening' | 'insufficient_data' = 'stable';
+  if (checkIns.length < 3) painTrend = 'insufficient_data';
+  else if (recentPain < olderPain - 0.5) painTrend = 'improving';
+  else if (recentPain > olderPain + 0.5) painTrend = 'worsening';
+
+  const overallTrend = painTrend;
+
+  const symptomChanges: string[] = [];
+  if (checkIns.length >= 3) {
+    if (recentPain < olderPain - 1) symptomChanges.push('Pain levels have decreased recently');
+    else if (recentPain > olderPain + 1) symptomChanges.push('Pain levels have increased recently');
+  }
+
+  const recommendations: string[] = [];
+  if (avgPain >= 7) recommendations.push('High average pain — consider scheduling a review');
+  if (flagCount > 2) recommendations.push(`${flagCount} red flags recorded — follow up recommended`);
+  if (avgSleep < 4) recommendations.push('Poor average sleep quality noted');
+  if (recommendations.length === 0) recommendations.push('Progress appears stable — continue current plan');
 
   return {
-    total_check_ins: total,
-    compliance_rate: complianceMetrics.overall,
-    compliance_metrics: complianceMetrics,
+    client,
+    checkIns,
     summary: {
       overall_trend: overallTrend,
       avg_pain_level: Math.round(avgPain * 10) / 10,

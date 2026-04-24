@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertCircle, Send, UserCheck, ChevronRight, Check, Phone, X } from 'lucide-react';
-import { storeSymptomQuery, createContactRequest, getPractitionerDisplayName, getCheckIns } from '../lib/store';
+import { storeSymptomQuery, createContactRequest, getPractitionerDisplayName, getCheckIns, fireContactProfessionalWebhook } from '../lib/store';
 import { analyzeSymptomLocal, analyzeSymptomRealTime, buildClientRiskContext } from '../lib/symptomAnalysis';
 import type { ClientRiskContext } from '../lib/symptomAnalysis';
 import { getLoggedInClientId } from '../hooks/useClient';
@@ -80,6 +80,12 @@ export default function QueryPage() {
         client.full_name,
         true
       );
+      fireContactProfessionalWebhook(
+        client.practitioner_id,
+        client.full_name ?? '',
+        prompt,
+        redFlags.severity
+      );
       setRtContacted(true);
       setRedFlags((prev) => ({ ...prev, showEmergencyModal: false }));
     } catch {
@@ -127,6 +133,12 @@ export default function QueryPage() {
         result.matched_score || 0,
         client.full_name,
         result.red_flag_detected
+      );
+      fireContactProfessionalWebhook(
+        client.practitioner_id,
+        client.full_name ?? '',
+        prompt,
+        result.matched_score || 0
       );
       setContacted(true);
     } catch (err) {

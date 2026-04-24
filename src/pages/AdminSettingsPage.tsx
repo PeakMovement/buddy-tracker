@@ -9,20 +9,13 @@ export default function AdminSettingsPage() {
   const [practitioner, setPractitioner] = useState<Practitioner | null>(null);
   const [practitioners, setPractitioners] = useState<Practitioner[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Onboarding webhook
   const [webhookUrl, setWebhookUrl] = useState('');
   const [webhookEnabled, setWebhookEnabled] = useState(true);
+  const [contactWebhookUrl, setContactWebhookUrl] = useState('');
+  const [contactWebhookEnabled, setContactWebhookEnabled] = useState(true);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [webhookSaved, setWebhookSaved] = useState(false);
   const [webhookError, setWebhookError] = useState('');
-
-  // Contact practitioner webhook
-  const [contactWebhookUrl, setContactWebhookUrl] = useState('');
-  const [contactWebhookEnabled, setContactWebhookEnabled] = useState(true);
-  const [savingContactWebhook, setSavingContactWebhook] = useState(false);
-  const [contactWebhookSaved, setContactWebhookSaved] = useState(false);
-  const [contactWebhookError, setContactWebhookError] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -48,28 +41,19 @@ export default function AdminSettingsPage() {
     setWebhookError('');
     setWebhookSaved(false);
     try {
-      await saveWebhookSettings(practitionerId, webhookUrl.trim(), webhookEnabled);
+      await saveWebhookSettings(
+        practitionerId,
+        webhookUrl.trim(),
+        webhookEnabled,
+        contactWebhookUrl.trim(),
+        contactWebhookEnabled
+      );
       setWebhookSaved(true);
       setTimeout(() => setWebhookSaved(false), 3000);
     } catch {
       setWebhookError('Failed to save webhook settings.');
     } finally {
       setSavingWebhook(false);
-    }
-  }
-
-  async function handleSaveContactWebhook() {
-    setSavingContactWebhook(true);
-    setContactWebhookError('');
-    setContactWebhookSaved(false);
-    try {
-      await saveWebhookSettings(practitionerId, webhookUrl, webhookEnabled, contactWebhookUrl.trim(), contactWebhookEnabled);
-      setContactWebhookSaved(true);
-      setTimeout(() => setContactWebhookSaved(false), 3000);
-    } catch {
-      setContactWebhookError('Failed to save contact webhook settings.');
-    } finally {
-      setSavingContactWebhook(false);
     }
   }
 
@@ -90,13 +74,12 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      {/* Onboarding webhook */}
       <div className="card" style={{ marginBottom: '16px', padding: '16px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Link size={14} /> Webhook — Onboarding
+          <Link size={14} /> Alert Webhook
         </h3>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
-          Fires when a new client invitation is sent. Use this to trigger your onboarding automation in Make.com or Zapier.
+          Paste a Make.com or Zapier webhook URL to receive instant notifications when clients trigger red-flag alerts.
         </p>
 
         <div className="form-group" style={{ marginBottom: '12px' }}>
@@ -114,23 +97,37 @@ export default function AdminSettingsPage() {
           <button
             onClick={() => setWebhookEnabled(!webhookEnabled)}
             style={{
-              width: '36px', height: '20px', borderRadius: '10px',
+              width: '36px',
+              height: '20px',
+              borderRadius: '10px',
               background: webhookEnabled ? 'var(--primary)' : 'var(--border)',
-              border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+              border: 'none',
+              cursor: 'pointer',
+              position: 'relative',
+              transition: 'background 0.2s',
+              flexShrink: 0,
             }}
           >
             <span style={{
-              position: 'absolute', top: '2px', left: webhookEnabled ? '18px' : '2px',
-              width: '16px', height: '16px', borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+              position: 'absolute',
+              top: '2px',
+              left: webhookEnabled ? '18px' : '2px',
+              width: '16px',
+              height: '16px',
+              borderRadius: '50%',
+              background: '#fff',
+              transition: 'left 0.2s',
             }} />
           </button>
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {webhookEnabled ? 'Enabled — invitations will be sent' : 'Disabled — no invitations will be sent'}
+            {webhookEnabled ? 'Enabled — alerts will be sent' : 'Disabled — no alerts will be sent'}
           </span>
         </div>
 
         {webhookError && <p className="login-error">{webhookError}</p>}
-        {webhookSaved && <p style={{ fontSize: '13px', color: 'var(--success)', marginBottom: '10px' }}>Webhook settings saved.</p>}
+        {webhookSaved && (
+          <p style={{ fontSize: '13px', color: 'var(--success)', marginBottom: '10px' }}>Webhook settings saved.</p>
+        )}
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button className="btn btn-primary btn-sm" onClick={handleSaveWebhook} disabled={savingWebhook}>
@@ -147,13 +144,12 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      {/* Contact practitioner webhook */}
       <div className="card" style={{ marginBottom: '16px', padding: '16px' }}>
         <h3 style={{ fontSize: '14px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Link size={14} /> Webhook — Contact Practitioner
+          <Link size={14} /> Contact Professional Webhook
         </h3>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
-          Fires when a client clicks the "Contact Practitioner" button on the Query page. Use this to receive instant notifications via email or your team chat.
+          Paste a Make.com or Zapier webhook URL to receive a notification when a client taps "Contact My Professional" on the symptom query page.
         </p>
 
         <div className="form-group" style={{ marginBottom: '12px' }}>
@@ -171,14 +167,26 @@ export default function AdminSettingsPage() {
           <button
             onClick={() => setContactWebhookEnabled(!contactWebhookEnabled)}
             style={{
-              width: '36px', height: '20px', borderRadius: '10px',
+              width: '36px',
+              height: '20px',
+              borderRadius: '10px',
               background: contactWebhookEnabled ? 'var(--primary)' : 'var(--border)',
-              border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+              border: 'none',
+              cursor: 'pointer',
+              position: 'relative',
+              transition: 'background 0.2s',
+              flexShrink: 0,
             }}
           >
             <span style={{
-              position: 'absolute', top: '2px', left: contactWebhookEnabled ? '18px' : '2px',
-              width: '16px', height: '16px', borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+              position: 'absolute',
+              top: '2px',
+              left: contactWebhookEnabled ? '18px' : '2px',
+              width: '16px',
+              height: '16px',
+              borderRadius: '50%',
+              background: '#fff',
+              transition: 'left 0.2s',
             }} />
           </button>
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
@@ -186,12 +194,14 @@ export default function AdminSettingsPage() {
           </span>
         </div>
 
-        {contactWebhookError && <p className="login-error">{contactWebhookError}</p>}
-        {contactWebhookSaved && <p style={{ fontSize: '13px', color: 'var(--success)', marginBottom: '10px' }}>Webhook settings saved.</p>}
+        {webhookError && <p className="login-error">{webhookError}</p>}
+        {webhookSaved && (
+          <p style={{ fontSize: '13px', color: 'var(--success)', marginBottom: '10px' }}>Webhook settings saved.</p>
+        )}
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <button className="btn btn-primary btn-sm" onClick={handleSaveContactWebhook} disabled={savingContactWebhook}>
-            {savingContactWebhook ? 'Saving...' : 'Save Webhook'}
+          <button className="btn btn-primary btn-sm" onClick={handleSaveWebhook} disabled={savingWebhook}>
+            {savingWebhook ? 'Saving...' : 'Save Webhook'}
           </button>
           <a
             href="https://www.make.com/en/register"
@@ -211,8 +221,12 @@ export default function AdminSettingsPage() {
             <div
               key={p.id}
               style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 0', borderBottom: '1px solid var(--border)', fontSize: '14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 0',
+                borderBottom: '1px solid var(--border)',
+                fontSize: '14px',
               }}
             >
               <div>
