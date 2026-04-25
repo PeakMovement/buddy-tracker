@@ -208,6 +208,22 @@ export async function storeSymptomQuery(
   });
 }
 
+function normalizeWebhookUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return trimmed;
+  // Strip email-style prefix: "token@host" → "https://host/token"
+  const atIndex = trimmed.indexOf('@');
+  if (atIndex !== -1 && !trimmed.startsWith('http')) {
+    const token = trimmed.slice(0, atIndex);
+    const host = trimmed.slice(atIndex + 1);
+    return `https://${host}/${token}`;
+  }
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    return `https://${trimmed}`;
+  }
+  return trimmed;
+}
+
 export async function getWebhookSettings(practitionerId: string): Promise<{
   webhook_url: string;
   enabled: boolean;
@@ -231,11 +247,11 @@ export async function saveWebhookSettings(
 ): Promise<void> {
   const existing = await getWebhookSettings(practitionerId);
   const patch: Record<string, unknown> = {
-    webhook_url: webhookUrl,
+    webhook_url: normalizeWebhookUrl(webhookUrl),
     enabled,
     updated_at: new Date().toISOString(),
   };
-  if (contactWebhookUrl !== undefined) patch.contact_webhook_url = contactWebhookUrl;
+  if (contactWebhookUrl !== undefined) patch.contact_webhook_url = normalizeWebhookUrl(contactWebhookUrl);
   if (contactWebhookEnabled !== undefined) patch.contact_webhook_enabled = contactWebhookEnabled;
 
   if (existing) {
@@ -257,7 +273,7 @@ export async function fireContactProfessionalWebhook(
   symptomScore: number
 ): Promise<void> {
   const settings = await getWebhookSettings(practitionerId);
-  const webhookUrl = settings?.contact_webhook_url?.trim();
+  const webhookUrl = normalizeWebhookUrl(settings?.contact_webhook_url ?? '');
   if (!webhookUrl || !settings?.contact_webhook_enabled) return;
 
   await fetch(webhookUrl, {
