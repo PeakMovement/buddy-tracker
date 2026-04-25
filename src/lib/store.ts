@@ -274,7 +274,18 @@ export async function fireContactProfessionalWebhook(
   symptomDescription: string,
   symptomScore: number
 ): Promise<void> {
-  const settings = await getWebhookSettings(practitionerId);
+  let settings = await getWebhookSettings(practitionerId);
+  // Fall back to admin's webhook if the assigned practitioner has none configured
+  if (!settings?.contact_webhook_url) {
+    const { data: admin } = await supabase
+      .from('practitioners')
+      .select('id')
+      .eq('is_admin', true)
+      .maybeSingle();
+    if (admin && admin.id !== practitionerId) {
+      settings = await getWebhookSettings(admin.id);
+    }
+  }
   const webhookUrl = normalizeWebhookUrl(settings?.contact_webhook_url ?? '');
   if (!webhookUrl || !settings?.contact_webhook_enabled) return;
 
