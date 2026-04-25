@@ -311,7 +311,12 @@ export async function createContactRequest(
   symptomDescription: string,
   symptomScore: number,
   clientName?: string,
-  redFlagDetected?: boolean
+  redFlagDetected?: boolean,
+  aiRationale?: string | null,
+  aiRedFlags?: string[] | null,
+  aiCategories?: string[] | null,
+  urgency?: string | null,
+  source?: string | null,
 ): Promise<void> {
   await supabase.from('contact_requests').insert({
     client_id: clientId,
@@ -319,6 +324,11 @@ export async function createContactRequest(
     symptom_description: symptomDescription,
     symptom_score: symptomScore,
     is_read: false,
+    ai_rationale: aiRationale ?? null,
+    ai_red_flags: aiRedFlags ?? null,
+    ai_categories: aiCategories ?? null,
+    urgency: urgency ?? null,
+    source: source ?? null,
   });
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;

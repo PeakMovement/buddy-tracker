@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertCircle, Send, UserCheck, ChevronRight, Check, Phone, X } from 'lucide-react';
 import { storeSymptomQuery, createContactRequest, getPractitionerDisplayName, getCheckIns, fireContactProfessionalWebhook } from '../lib/store';
-import { analyzeSymptomLocal, analyzeSymptomRealTime, buildClientRiskContext } from '../lib/symptomAnalysis';
-import type { ClientRiskContext } from '../lib/symptomAnalysis';
+import { analyzeSymptomCombined, analyzeSymptomRealTime, buildClientRiskContext } from '../lib/symptomAnalysisAI';
+import type { CombinedTriageResult, ClientRiskContext } from '../lib/symptomAnalysisAI';
 import { getLoggedInClientId } from '../hooks/useClient';
 import { useClientContext } from '../context/ClientContext';
 
@@ -14,13 +14,35 @@ const EXAMPLE_PROMPTS = [
   'I have constant dull ache in my right knee',
 ];
 
+const URGENCY_STYLES: Record<string, { bg: string; border: string; text: string; pillBg: string }> = {
+  emergency: { bg: '#fef2f2', border: '#fecaca', text: '#b91c1c', pillBg: '#b91c1c' },
+  urgent:    { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c', pillBg: '#c2410c' },
+  soon:      { bg: '#fffbeb', border: '#fde68a', text: '#92400e', pillBg: '#92400e' },
+  monitor:   { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af', pillBg: '#1e40af' },
+  routine:   { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534', pillBg: '#166534' },
+};
+
+function getContactButtonColor(urgency: string): string {
+  if (urgency === 'emergency') return '#b91c1c';
+  if (urgency === 'urgent') return '#c2410c';
+  return '#1d4ed8';
+}
+
+function getContactButtonLabel(urgency: string, assignedName: string | null): string {
+  const name = assignedName ?? 'My Professional';
+  if (urgency === 'emergency' || urgency === 'urgent') {
+    return `Contact ${name} \u2014 urgent review needed`;
+  }
+  return `Contact ${name} \u2014 symptoms noted`;
+}
+
 export default function QueryPage() {
   const clientId = getLoggedInClientId();
   const { client, practitioners, assignedPractitioner, selectPractitioner } = useClientContext();
   const [prompt, setPrompt] = useState('');
   const [exampleIndex, setExampleIndex] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<CombinedTriageResult | null>(null);
   const [error, setError] = useState('');
   const [contacting, setContacting] = useState(false);
   const [contacted, setContacted] = useState(false);
@@ -78,7 +100,12 @@ export default function QueryPage() {
         prompt,
         redFlags.severity,
         client.full_name,
-        true
+        true,
+        null,
+        null,
+        null,
+        redFlags.urgency,
+        'keyword_only',
       );
       await fireContactProfessionalWebhook(
         client.practitioner_id,
@@ -123,6 +150,7 @@ export default function QueryPage() {
       setError('No assigned professional found in your profile');
       return;
     }
+    if (!result) return;
     setContacting(true);
     setError('');
     try {
@@ -132,7 +160,12 @@ export default function QueryPage() {
         prompt,
         result.matched_score || 0,
         client.full_name,
-        result.red_flag_detected
+        result.red_flag_detected,
+        result.ai_rationale,
+        result.ai_red_flags,
+        result.ai_categories,
+        result.urgency,
+        result.source,
       );
       await fireContactProfessionalWebhook(
         client.practitioner_id,
@@ -160,9 +193,16 @@ export default function QueryPage() {
     setError('');
     setAnalyzing(true);
     try {
-      const analysisResult = analyzeSymptomLocal(prompt, clientRiskContext);
-      storeSymptomQuery(clientId, prompt, analysisResult.red_flag_detected, analysisResult.confidence_score);
-      setResult(analysisResult);
+      const practitionerName = assignedPractitioner
+        ? getPractitionerDisplayName(assignedPractitioner)
+        : undefined;
+      const triageResult = await analyzeSymptomCombined(prompt, clientRiskContext, practitionerName);
+      const effectiveRedFlag =
+        triageResult.red_flag_detected &&
+        triageResult.negation_detected !== true &&
+        triageResult.attribution_detected !== true;
+      storeSymptomQuery(clientId, prompt, effectiveRedFlag, triageResult.confidence_score);
+      setResult(triageResult);
     } catch (err) {
       setError('Failed to analyze symptoms. Please try again.');
     } finally {
@@ -256,61 +296,71 @@ export default function QueryPage() {
   }
 
   if (result) {
+    const urgencyStyle = URGENCY_STYLES[result.urgency] ?? URGENCY_STYLES.routine;
+    const urgencyLabel = result.urgency.toUpperCase();
+
     return (
       <div className="checkin-page">
         <div className="checkin-card">
           <div className="step-content">
-            {result.red_flag_detected ? (
-              <div style={{
-                display: 'flex',
-                gap: '12px',
-                padding: '16px',
-                backgroundColor: '#fff7ed',
-                border: '1px solid #fed7aa',
-                borderRadius: 'var(--radius-sm)',
-                marginBottom: '20px',
-                alignItems: 'flex-start',
-              }}>
-                <AlertCircle size={24} style={{ color: '#c2410c', flexShrink: 0, marginTop: '2px' }} />
-                <div>
-                  <h3 style={{ color: '#c2410c', marginBottom: '4px', fontSize: '16px', fontWeight: '600' }}>
-                    Medical Referral Recommended
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              padding: '16px',
+              backgroundColor: urgencyStyle.bg,
+              border: `1px solid ${urgencyStyle.border}`,
+              borderRadius: 'var(--radius-sm)',
+              marginBottom: '20px',
+              alignItems: 'flex-start',
+            }}>
+              <AlertCircle size={24} style={{ color: urgencyStyle.text, flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                  <h3 style={{ color: urgencyStyle.text, margin: 0, fontSize: '16px', fontWeight: '600' }}>
+                    {result.urgency === 'emergency' || result.urgency === 'urgent'
+                      ? 'Medical Referral Recommended'
+                      : result.urgency === 'soon'
+                      ? 'Follow-up Recommended'
+                      : 'Monitoring Recommended'}
                   </h3>
-                  <p style={{ color: '#92400e', fontSize: '14px', lineHeight: '1.5', marginBottom: '8px' }}>
-                    {result.suggested_next_step}
-                  </p>
-                  {result.matched_symptom && (
-                    <p style={{ color: '#92400e', fontSize: '12px' }}>
-                      <strong>Matched:</strong> {result.matched_symptom} (Score: {result.matched_score}/10)
-                    </p>
-                  )}
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '2px 10px',
+                    backgroundColor: urgencyStyle.pillBg,
+                    color: '#fff',
+                    borderRadius: '999px',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    letterSpacing: '0.05em',
+                    flexShrink: 0,
+                  }}>
+                    {urgencyLabel}
+                  </span>
                 </div>
-              </div>
-            ) : (
-              <div style={{
-                display: 'flex',
-                gap: '12px',
-                padding: '16px',
-                backgroundColor: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                borderRadius: 'var(--radius-sm)',
-                marginBottom: '20px',
-              }}>
-                <div>
-                  <h3 style={{ color: '#166534', marginBottom: '4px', fontSize: '16px', fontWeight: '600' }}>
-                    Monitoring Recommended
-                  </h3>
-                  <p style={{ color: '#166534', fontSize: '14px', lineHeight: '1.5', marginBottom: '8px' }}>
-                    {result.suggested_next_step}
+
+                <p style={{ color: urgencyStyle.text, fontSize: '14px', lineHeight: '1.5', marginBottom: '6px' }}>
+                  {result.suggested_next_step}
+                </p>
+
+                {result.ai_red_flags && result.ai_red_flags.length > 0 && (
+                  <p style={{ color: urgencyStyle.text, fontSize: '12px', marginBottom: '4px', opacity: 0.85 }}>
+                    <strong>Flagged:</strong> {result.ai_red_flags.join(', ')}
                   </p>
-                  {result.matched_symptom && (
-                    <p style={{ color: '#166534', fontSize: '12px' }}>
-                      <strong>Matched:</strong> {result.matched_symptom} (Score: {result.matched_score}/10)
-                    </p>
-                  )}
-                </div>
+                )}
+
+                {(result.negation_detected || result.attribution_detected) && (
+                  <p style={{ color: urgencyStyle.text, fontSize: '12px', marginBottom: '4px', opacity: 0.7, fontStyle: 'italic' }}>
+                    Symptoms appear to be negated/attributed to someone else \u2014 rephrase if this is incorrect.
+                  </p>
+                )}
+
+                {result.source === 'ai_with_keyword_escalation' && (
+                  <p style={{ color: urgencyStyle.text, fontSize: '12px', opacity: 0.7, fontStyle: 'italic' }}>
+                    Severity escalated by symptom pattern detection.
+                  </p>
+                )}
               </div>
-            )}
+            </div>
 
             <div style={{
               padding: '12px',
@@ -326,7 +376,7 @@ export default function QueryPage() {
             </div>
 
             <div className="step-actions" style={{ flexDirection: 'column', gap: '12px' }}>
-              {result.matched_score >= 5 && !contacted && (
+              {result.severity >= 5 && !contacted && (
                 <>
                   {!client?.practitioner_id ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -347,17 +397,13 @@ export default function QueryPage() {
                       className="btn btn-primary"
                       style={{
                         flex: 1,
-                        backgroundColor: result.matched_score >= 9 ? '#b91c1c' : result.matched_score >= 7 ? '#c2410c' : '#1d4ed8',
+                        backgroundColor: getContactButtonColor(result.urgency),
                       }}
                       onClick={handleContactProfessional}
                       disabled={contacting}
                     >
                       <Send size={16} />
-                      {contacting
-                        ? 'Sending...'
-                        : result.matched_score >= 7
-                        ? `Contact ${assignedName ?? 'My Professional'} — urgent review needed`
-                        : `Contact ${assignedName ?? 'My Professional'} — symptoms noted`}
+                      {contacting ? 'Sending...' : getContactButtonLabel(result.urgency, assignedName)}
                     </button>
                   )}
                 </>
@@ -433,7 +479,7 @@ export default function QueryPage() {
                 <UserCheck size={15} style={{ opacity: 0.6 }} />
                 {client.practitioner_id
                   ? <>My professional: <strong style={{ marginLeft: '4px' }}>{assignedName ?? 'Loading...'}</strong></>
-                  : 'No professional selected — tap to assign one'}
+                  : 'No professional selected \u2014 tap to assign one'}
               </span>
               <ChevronRight size={14} style={{ opacity: 0.4 }} />
             </div>
@@ -478,10 +524,10 @@ export default function QueryPage() {
                   {redFlags.urgency === 'emergency'
                     ? 'This may need emergency attention'
                     : redFlags.urgency === 'urgent'
-                    ? 'This may need immediate attention — urgent review recommended'
+                    ? 'This may need immediate attention \u2014 urgent review recommended'
                     : redFlags.urgency === 'soon'
                     ? 'Symptoms suggest a follow-up soon is advisable'
-                    : 'Symptoms noted — your professional can help'}
+                    : 'Symptoms noted \u2014 your professional can help'}
                 </span>
               </div>
 
@@ -507,8 +553,8 @@ export default function QueryPage() {
                     {rtContacting
                       ? 'Sending...'
                       : redFlags.urgency === 'urgent' || redFlags.urgency === 'emergency'
-                      ? `Contact ${assignedName ?? 'My Professional'} — urgent review needed`
-                      : `Contact ${assignedName ?? 'My Professional'} — symptoms noted`}
+                      ? `Contact ${assignedName ?? 'My Professional'} \u2014 urgent review needed`
+                      : `Contact ${assignedName ?? 'My Professional'} \u2014 symptoms noted`}
                   </span>
                 </button>
               )}
@@ -611,7 +657,7 @@ export default function QueryPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <a
-                href="tel:999"
+                href="tel:112"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -627,7 +673,7 @@ export default function QueryPage() {
                 }}
               >
                 <Phone size={16} />
-                Call 999
+                Call 112 \u2014 Emergency
               </a>
 
               {client?.practitioner_id && !rtContacted ? (
