@@ -149,7 +149,7 @@ export default function AdminSettingsPage() {
           <Link size={14} /> Contact Professional Webhook
         </h3>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
-          Paste a Make.com or Zapier webhook URL to receive a notification when a client taps "Contact My Professional" on the symptom query page.
+          Paste a Make.com or Zapier webhook URL to receive a notification when a client taps “Contact My Professional” on the symptom query page.
         </p>
 
         <div className="form-group" style={{ marginBottom: '12px' }}>
