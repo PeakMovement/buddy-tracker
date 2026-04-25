@@ -80,7 +80,7 @@ export default function QueryPage() {
         client.full_name,
         true
       );
-      fireContactProfessionalWebhook(
+      await fireContactProfessionalWebhook(
         client.practitioner_id,
         client.full_name ?? '',
         prompt,
@@ -134,7 +134,7 @@ export default function QueryPage() {
         client.full_name,
         result.red_flag_detected
       );
-      fireContactProfessionalWebhook(
+      await fireContactProfessionalWebhook(
         client.practitioner_id,
         client.full_name ?? '',
         prompt,
