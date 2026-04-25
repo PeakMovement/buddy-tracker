@@ -48,10 +48,18 @@ export default function AdminSettingsPage() {
         contactWebhookUrl.trim(),
         contactWebhookEnabled
       );
+      // Read back from DB to confirm what was actually persisted
+      const ws = await getWebhookSettings(practitionerId);
+      if (ws) {
+        setWebhookUrl(ws.webhook_url);
+        setWebhookEnabled(ws.enabled);
+        setContactWebhookUrl(ws.contact_webhook_url);
+        setContactWebhookEnabled(ws.contact_webhook_enabled);
+      }
       setWebhookSaved(true);
       setTimeout(() => setWebhookSaved(false), 3000);
     } catch {
-      setWebhookError('Failed to save webhook settings.');
+      setWebhookError('Failed to save webhook settings. Please try again.');
     } finally {
       setSavingWebhook(false);
     }

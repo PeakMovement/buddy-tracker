@@ -255,14 +255,16 @@ export async function saveWebhookSettings(
   if (contactWebhookEnabled !== undefined) patch.contact_webhook_enabled = contactWebhookEnabled;
 
   if (existing) {
-    await supabase
+    const { error } = await supabase
       .from('webhook_settings')
       .update(patch)
       .eq('practitioner_id', practitionerId);
+    if (error) throw new Error(error.message);
   } else {
-    await supabase
+    const { error } = await supabase
       .from('webhook_settings')
       .insert({ practitioner_id: practitionerId, ...patch });
+    if (error) throw new Error(error.message);
   }
 }
 
