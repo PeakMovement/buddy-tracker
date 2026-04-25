@@ -105,6 +105,20 @@ export async function deleteClient(clientId: string): Promise<void> {
   await supabase.from('clients').delete().eq('id', clientId);
 }
 
+export async function getLastCheckInDates(clientIds: string[]): Promise<Record<string, string>> {
+  if (clientIds.length === 0) return {};
+  const { data } = await supabase
+    .from('check_ins')
+    .select('client_id, created_at')
+    .in('client_id', clientIds)
+    .order('created_at', { ascending: false });
+  const map: Record<string, string> = {};
+  for (const row of data ?? []) {
+    if (!map[row.client_id]) map[row.client_id] = row.created_at;
+  }
+  return map;
+}
+
 export async function getCheckIns(clientId: string): Promise<CheckIn[]> {
   const { data } = await supabase
     .from('check_ins')

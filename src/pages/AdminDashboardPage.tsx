@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getLoggedInPractitionerId } from '../hooks/usePractitioner';
-import { getPractitioner, getClients, getPractitioners } from '../lib/store';
+import { getPractitioner, getClients, getPractitioners, getLastCheckInDates } from '../lib/store';
 import type { Client, Practitioner } from '../types/database';
-import { formatDate } from '../lib/utils';
+import { formatDate, formatRelativeDate } from '../lib/utils';
 import { ChevronRight, User } from 'lucide-react';
 
 export default function AdminDashboardPage() {
@@ -11,6 +11,7 @@ export default function AdminDashboardPage() {
   const practitionerId = getLoggedInPractitionerId()!;
   const [practitioner, setPractitioner] = useState<Practitioner | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [lastCheckIns, setLastCheckIns] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export default function AdminDashboardPage() {
         list = await getClients(practitionerId);
       }
       setClients(list);
+      const dates = await getLastCheckInDates(list.map((c) => c.id));
+      setLastCheckIns(dates);
       setLoading(false);
     })();
   }, [practitionerId]);
@@ -50,46 +53,52 @@ export default function AdminDashboardPage() {
         </div>
       ) : (
         <div className="client-list">
-          {clients.map((client) => (
-            <div
-              key={client.id}
-              className="client-card card"
-              onClick={() => navigate(`/admin/client/${client.id}`)}
-              style={{ cursor: 'pointer' }}
-            >
-              <div className="client-card-header">
-                <div>
-                  <h3 className="client-name">{client.full_name}</h3>
-                  {(client as any)._practitionerName !== undefined && (
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      marginTop: '4px',
-                      padding: '2px 8px',
-                      borderRadius: '999px',
-                      fontSize: '11px',
-                      fontWeight: '500',
-                      ...((client as any)._practitionerName === '—'
-                        ? { backgroundColor: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }
-                        : { backgroundColor: '#e0f2fe', color: '#0369a1' }),
-                    }}>
-                      <User size={10} />
-                      {(client as any)._practitionerName === '—' ? 'Unassigned' : (client as any)._practitionerName}
-                    </span>
-                  )}
-                  <p className="client-complaint">{client.primary_complaint}</p>
+          {clients.map((client) => {
+            const lastCheckIn = lastCheckIns[client.id];
+            return (
+              <div
+                key={client.id}
+                className="client-card card"
+                onClick={() => navigate(`/admin/client/${client.id}`)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="client-card-header">
+                  <div>
+                    <h3 className="client-name">{client.full_name}</h3>
+                    {(client as any)._practitionerName !== undefined && (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        marginTop: '4px',
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        ...((client as any)._practitionerName === '—'
+                          ? { backgroundColor: 'var(--bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }
+                          : { backgroundColor: '#e0f2fe', color: '#0369a1' }),
+                      }}>
+                        <User size={10} />
+                        {(client as any)._practitionerName === '—' ? 'Unassigned' : (client as any)._practitionerName}
+                      </span>
+                    )}
+                    <p className="client-complaint">{client.primary_complaint}</p>
+                  </div>
+                  <ChevronRight size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
                 </div>
-                <ChevronRight size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                <div className="client-meta">
+                  <span>Code: <strong>{client.login_code}</strong></span>
+                  {client.next_appointment && (
+                    <span>Next: {formatDate(client.next_appointment)}</span>
+                  )}
+                  <span style={{ color: lastCheckIn ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
+                    Last check-in: <strong>{lastCheckIn ? formatRelativeDate(lastCheckIn) : 'Never'}</strong>
+                  </span>
+                </div>
               </div>
-              <div className="client-meta">
-                <span>Code: <strong>{client.login_code}</strong></span>
-                {client.next_appointment && (
-                  <span>Next: {formatDate(client.next_appointment)}</span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
