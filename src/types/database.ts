@@ -74,6 +74,9 @@ export interface ContactRequest {
   responded_at: string | null;
   created_at: string;
   clients?: { full_name: string; primary_complaint: string };
+  urgency?: string | null;
+  ai_rationale?: string | null;
+  practitioner_note?: string | null;
 }
 
 export interface SymptomChange {
