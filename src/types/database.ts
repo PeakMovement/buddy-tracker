@@ -76,7 +76,30 @@ export interface ContactRequest {
   clients?: { full_name: string; primary_complaint: string };
   urgency?: string | null;
   ai_rationale?: string | null;
+  ai_red_flags?: string[] | null;
+  ai_categories?: string[] | null;
+  source?: string | null;
   practitioner_note?: string | null;
+}
+
+export interface DeviceVisit {
+  id: string;
+  client_id: string | null;
+  device_type: string;
+  user_agent: string;
+  screen_width: number;
+  screen_height: number;
+  page: string;
+  visited_at: string;
+}
+
+export interface ClientInvitation {
+  id: string;
+  practitioner_id: string;
+  email: string;
+  name: string;
+  status: string;
+  sent_at: string;
 }
 
 export interface SymptomChange {
