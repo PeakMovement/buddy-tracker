@@ -216,7 +216,7 @@ export default function AdminAnalyticsPage() {
               <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: '12px', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   {v.device_type === 'mobile' ? <Smartphone size={12} color="#2563eb" /> : <Monitor size={12} color="#16a34a" />}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{s.clientMap[v.client_id] ?? 'Unknown'}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{s.clientMap[v.client_id ?? ''] ?? 'Unknown'}</span>
                   <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>{v.page}</span>
                 </div>
                 <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{formatDate(v.visited_at)}</span>
