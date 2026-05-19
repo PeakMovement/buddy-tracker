@@ -31,9 +31,59 @@ function getContactButtonColor(urgency: string): string {
 function getContactButtonLabel(urgency: string, assignedName: string | null): string {
   const name = assignedName ?? 'My Professional';
   if (urgency === 'emergency' || urgency === 'urgent') {
-    return `Contact ${name} \u2014 urgent review needed`;
+    return `Contact ${name} — urgent review needed`;
   }
-  return `Contact ${name} \u2014 symptoms noted`;
+  return `Contact ${name} — symptoms noted`;
+}
+
+const DAILY_QUERY_LIMIT = 3;
+const QUERY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function getQueryWindow(clientId: string): { count: number; windowStart: number } {
+  const key = `yves_queries_${clientId}`;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.count === 'number' && typeof parsed.windowStart === 'number') {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore corrupt data
+  }
+  return { count: 0, windowStart: 0 };
+}
+
+function getYvesQueryInfo(clientId: string): { count: number; resetsAt: number | null } {
+  const { count, windowStart } = getQueryWindow(clientId);
+  const now = Date.now();
+  if (windowStart && now - windowStart < QUERY_WINDOW_MS) {
+    return { count, resetsAt: windowStart + QUERY_WINDOW_MS };
+  }
+  return { count: 0, resetsAt: null };
+}
+
+function incrementYvesQueryCount(clientId: string): void {
+  const key = `yves_queries_${clientId}`;
+  const now = Date.now();
+  const { count, windowStart } = getQueryWindow(clientId);
+  const isWithinWindow = windowStart && now - windowStart < QUERY_WINDOW_MS;
+  localStorage.setItem(key, JSON.stringify({
+    count: isWithinWindow ? count + 1 : 1,
+    windowStart: isWithinWindow ? windowStart : now,
+  }));
+}
+
+function formatTimeRemaining(resetsAt: number): string {
+  const ms = resetsAt - Date.now();
+  if (ms <= 0) return '0 minutes';
+  const totalMinutes = Math.ceil(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours} hour${hours !== 1 ? 's' : ''}`;
+  return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
 }
 
 export default function QueryPage() {
@@ -58,12 +108,31 @@ export default function QueryPage() {
   const [rtContacting, setRtContacting] = useState(false);
   const [rtContacted, setRtContacted] = useState(false);
   const [clientRiskContext, setClientRiskContext] = useState<ClientRiskContext | undefined>(undefined);
+  const [queryLimitInfo, setQueryLimitInfo] = useState<{ count: number; resetsAt: number | null }>({ count: 0, resetsAt: null });
+  const [timeRemaining, setTimeRemaining] = useState('');
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!clientId) return;
     getCheckIns(clientId).then((cis) => setClientRiskContext(buildClientRiskContext(cis)));
+    setQueryLimitInfo(getYvesQueryInfo(clientId));
   }, [clientId]);
+
+  useEffect(() => {
+    if (!queryLimitInfo.resetsAt) return;
+    const update = () => setTimeRemaining(formatTimeRemaining(queryLimitInfo.resetsAt!));
+    update();
+    const interval = setInterval(() => {
+      const info = clientId ? getYvesQueryInfo(clientId) : queryLimitInfo;
+      if (info.resetsAt && Date.now() >= info.resetsAt) {
+        setQueryLimitInfo({ count: 0, resetsAt: null });
+        clearInterval(interval);
+      } else {
+        update();
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [queryLimitInfo.resetsAt, clientId]);
 
   const debouncedAnalyze = useMemo(() => (text: string) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -192,6 +261,12 @@ export default function QueryPage() {
     }
     setError('');
     setAnalyzing(true);
+    const currentInfo = getYvesQueryInfo(clientId);
+    if (currentInfo.count >= DAILY_QUERY_LIMIT) {
+      setQueryLimitInfo(currentInfo);
+      setAnalyzing(false);
+      return;
+    }
     try {
       const practitionerName = assignedPractitioner
         ? getPractitionerDisplayName(assignedPractitioner)
@@ -202,6 +277,8 @@ export default function QueryPage() {
         triageResult.negation_detected !== true &&
         triageResult.attribution_detected !== true;
       storeSymptomQuery(clientId, prompt, effectiveRedFlag, triageResult.confidence_score);
+      incrementYvesQueryCount(clientId);
+      setQueryLimitInfo(getYvesQueryInfo(clientId));
       setResult(triageResult);
     } catch (err) {
       setError('Failed to analyze symptoms. Please try again.');
@@ -350,13 +427,7 @@ export default function QueryPage() {
 
                 {(result.negation_detected || result.attribution_detected) && (
                   <p style={{ color: urgencyStyle.text, fontSize: '12px', marginBottom: '4px', opacity: 0.7, fontStyle: 'italic' }}>
-                    Symptoms appear to be negated/attributed to someone else \u2014 rephrase if this is incorrect.
-                  </p>
-                )}
-
-                {result.source === 'ai_with_keyword_escalation' && (
-                  <p style={{ color: urgencyStyle.text, fontSize: '12px', opacity: 0.7, fontStyle: 'italic' }}>
-                    Severity escalated by symptom pattern detection.
+                    Symptoms appear to be negated/attributed to someone else — rephrase if this is incorrect.
                   </p>
                 )}
               </div>
@@ -455,7 +526,15 @@ export default function QueryPage() {
     <div className="checkin-page">
       <div className="checkin-card">
         <div className="step-content">
-          <h2>What symptoms are you feeling?</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1e3a5f', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#93c5fd', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>Y</div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>Yves</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Your clinical health monitor</div>
+            </div>
+          </div>
+
+          <h2>Tell Yves what you're experiencing.</h2>
           <p className="subtext">Describe any pain, discomfort, or symptoms you're experiencing</p>
 
           {client && (
@@ -479,7 +558,7 @@ export default function QueryPage() {
                 <UserCheck size={15} style={{ opacity: 0.6 }} />
                 {client.practitioner_id
                   ? <>My professional: <strong style={{ marginLeft: '4px' }}>{assignedName ?? 'Loading...'}</strong></>
-                  : 'No professional selected \u2014 tap to assign one'}
+                  : 'No professional selected — tap to assign one'}
               </span>
               <ChevronRight size={14} style={{ opacity: 0.4 }} />
             </div>
@@ -487,7 +566,7 @@ export default function QueryPage() {
 
           <textarea
             className="notes-input"
-            placeholder="Type your symptoms here..."
+            placeholder="Describe what you're experiencing — Yves is listening."
             value={prompt}
             onChange={(e) => {
               setPrompt(e.target.value);
@@ -524,10 +603,10 @@ export default function QueryPage() {
                   {redFlags.urgency === 'emergency'
                     ? 'This may need emergency attention'
                     : redFlags.urgency === 'urgent'
-                    ? 'This may need immediate attention \u2014 urgent review recommended'
+                    ? 'This may need immediate attention — urgent review recommended'
                     : redFlags.urgency === 'soon'
                     ? 'Symptoms suggest a follow-up soon is advisable'
-                    : 'Symptoms noted \u2014 your professional can help'}
+                    : 'Symptoms noted — your professional can help'}
                 </span>
               </div>
 
@@ -553,8 +632,8 @@ export default function QueryPage() {
                     {rtContacting
                       ? 'Sending...'
                       : redFlags.urgency === 'urgent' || redFlags.urgency === 'emergency'
-                      ? `Contact ${assignedName ?? 'My Professional'} \u2014 urgent review needed`
-                      : `Contact ${assignedName ?? 'My Professional'} \u2014 symptoms noted`}
+                      ? `Contact ${assignedName ?? 'My Professional'} — urgent review needed`
+                      : `Contact ${assignedName ?? 'My Professional'} — symptoms noted`}
                   </span>
                 </button>
               )}
@@ -584,16 +663,39 @@ export default function QueryPage() {
 
           {error && <p className="login-error" style={{ marginTop: '12px' }}>{error}</p>}
 
-          <div className="step-actions">
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              onClick={handleSubmit}
-              disabled={analyzing}
-            >
-              {analyzing ? 'Analyzing...' : redFlags.urgency === 'emergency' || redFlags.urgency === 'urgent' ? 'Get Urgent Guidance' : 'Submit'}
-            </button>
-          </div>
+          {queryLimitInfo.count >= DAILY_QUERY_LIMIT ? (
+            <div style={{
+              marginTop: '16px',
+              padding: '16px',
+              backgroundColor: '#fef3c7',
+              border: '1px solid #fcd34d',
+              borderRadius: 'var(--radius-sm)',
+              textAlign: 'center',
+            }}>
+              <p style={{ fontWeight: '600', fontSize: '14px', color: '#92400e', marginBottom: '4px' }}>
+                You've used all 3 questions for today
+              </p>
+              <p style={{ fontSize: '13px', color: '#92400e' }}>
+                Your questions will reset in <strong>{timeRemaining || formatTimeRemaining(queryLimitInfo.resetsAt!)}</strong>. If something is urgent, contact your professional directly.
+              </p>
+            </div>
+          ) : (
+            <div className="step-actions">
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleSubmit}
+                disabled={analyzing}
+              >
+                {analyzing ? 'Analyzing...' : redFlags.urgency === 'emergency' || redFlags.urgency === 'urgent' ? 'Get Urgent Guidance' : 'Submit'}
+              </button>
+              {queryLimitInfo.count > 0 && (
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '6px', width: '100%' }}>
+                  {DAILY_QUERY_LIMIT - queryLimitInfo.count} question{DAILY_QUERY_LIMIT - queryLimitInfo.count !== 1 ? 's' : ''} remaining today
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -652,12 +754,12 @@ export default function QueryPage() {
             </div>
 
             <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', marginBottom: '20px' }}>
-              The symptoms you have described may require immediate attention. Please take action now.
+              Your lead practitioner is available for urgent clinical concerns. Call them directly now.
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <a
-                href="tel:112"
+                href="tel:0827251107"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -673,7 +775,7 @@ export default function QueryPage() {
                 }}
               >
                 <Phone size={16} />
-                Call 112 \u2014 Emergency
+                Call Lead Physiotherapist
               </a>
 
               {client?.practitioner_id && !rtContacted ? (

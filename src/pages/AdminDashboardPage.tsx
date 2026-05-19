@@ -6,6 +6,34 @@ import type { Client, Practitioner } from '../types/database';
 import { formatDate, formatRelativeDate } from '../lib/utils';
 import { ChevronRight, User } from 'lucide-react';
 
+const OVERDUE_DAYS: Record<string, number> = {
+  daily: 1,
+  every_2_days: 2,
+  every_3_days: 3,
+  weekly: 7,
+};
+
+function isOverdue(client: Client, lastCheckIn: string | undefined): boolean {
+  if (!client.check_in_frequency) return false;
+  const days = OVERDUE_DAYS[client.check_in_frequency];
+  if (!days) return false;
+  if (!lastCheckIn) return true;
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const daysSince = (Date.now() - new Date(lastCheckIn).getTime()) / msPerDay;
+  return daysSince > days;
+}
+
+type CheckInFilter = 'all' | 'today' | 'last7' | 'over1week';
+
+function getCheckInFilter(lastCheckIn: string | undefined): 'today' | 'last7' | 'over1week' | 'never' {
+  if (!lastCheckIn) return 'never';
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const daysSince = (Date.now() - new Date(lastCheckIn).getTime()) / msPerDay;
+  if (daysSince < 1) return 'today';
+  if (daysSince <= 7) return 'last7';
+  return 'over1week';
+}
+
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
   const practitionerId = getLoggedInPractitionerId()!;
@@ -13,6 +41,7 @@ export default function AdminDashboardPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [lastCheckIns, setLastCheckIns] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [checkInFilter, setCheckInFilter] = useState<CheckInFilter>('all');
 
   useEffect(() => {
     (async () => {
@@ -37,12 +66,82 @@ export default function AdminDashboardPage() {
 
   if (loading) return <div className="page-loading">Loading...</div>;
 
+  const sorted = [...clients].sort((a, b) => {
+    const aOverdue = isOverdue(a, lastCheckIns[a.id]);
+    const bOverdue = isOverdue(b, lastCheckIns[b.id]);
+    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+    const aTime = lastCheckIns[a.id] ? new Date(lastCheckIns[a.id]).getTime() : 0;
+    const bTime = lastCheckIns[b.id] ? new Date(lastCheckIns[b.id]).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  const filtered = sorted.filter((c) => {
+    if (checkInFilter === 'all') return true;
+    const bucket = getCheckInFilter(lastCheckIns[c.id]);
+    if (checkInFilter === 'today') return bucket === 'today';
+    if (checkInFilter === 'last7') return bucket === 'last7' || bucket === 'today';
+    if (checkInFilter === 'over1week') return bucket === 'over1week' || bucket === 'never';
+    return true;
+  });
+
+  const filterCounts = {
+    today: sorted.filter((c) => getCheckInFilter(lastCheckIns[c.id]) === 'today').length,
+    last7: sorted.filter((c) => { const b = getCheckInFilter(lastCheckIns[c.id]); return b === 'last7' || b === 'today'; }).length,
+    over1week: sorted.filter((c) => { const b = getCheckInFilter(lastCheckIns[c.id]); return b === 'over1week' || b === 'never'; }).length,
+  };
+
+  const FILTERS: { key: CheckInFilter; label: string; count?: number }[] = [
+    { key: 'all', label: 'All', count: clients.length },
+    { key: 'today', label: 'Today', count: filterCounts.today },
+    { key: 'last7', label: 'Last 7 Days', count: filterCounts.last7 },
+    { key: 'over1week', label: 'Over 1 Week', count: filterCounts.over1week },
+  ];
+
   return (
     <div className="admin-page">
       <div className="page-header">
         <h2>{practitioner?.is_admin ? 'All Clients' : 'My Clients'}</h2>
         <p>{clients.length} client{clients.length !== 1 ? 's' : ''}</p>
       </div>
+
+      {clients.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          {FILTERS.map(({ key, label, count }) => (
+            <button
+              key={key}
+              onClick={() => setCheckInFilter(key)}
+              style={{
+                padding: '5px 12px',
+                borderRadius: '999px',
+                fontSize: '12px',
+                fontWeight: checkInFilter === key ? '600' : '400',
+                border: checkInFilter === key ? '1.5px solid var(--primary)' : '1.5px solid var(--border)',
+                background: checkInFilter === key ? 'var(--primary)' : 'var(--surface)',
+                color: checkInFilter === key ? '#fff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}
+            >
+              {label}
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '600',
+                background: checkInFilter === key ? 'rgba(255,255,255,0.25)' : 'var(--bg)',
+                borderRadius: '999px',
+                padding: '0 6px',
+                lineHeight: '18px',
+                minWidth: '18px',
+                textAlign: 'center',
+              }}>
+                {count}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {clients.length === 0 ? (
         <div className="empty-state">
@@ -51,20 +150,41 @@ export default function AdminDashboardPage() {
             Add a Client
           </button>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <p>No clients checked in in this period.</p>
+        </div>
       ) : (
         <div className="client-list">
-          {clients.map((client) => {
+          {filtered.map((client) => {
             const lastCheckIn = lastCheckIns[client.id];
+            const overdue = isOverdue(client, lastCheckIn);
             return (
               <div
                 key={client.id}
                 className="client-card card"
                 onClick={() => navigate(`/admin/client/${client.id}`)}
-                style={{ cursor: 'pointer' }}
+                style={{ cursor: 'pointer', ...(overdue ? { borderLeft: '3px solid #f59e0b' } : {}) }}
               >
                 <div className="client-card-header">
                   <div>
-                    <h3 className="client-name">{client.full_name}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <h3 className="client-name">{client.full_name}</h3>
+                      {overdue && (
+                        <span style={{
+                          background: '#fffbeb',
+                          color: '#92400e',
+                          border: '1px solid #fde68a',
+                          borderRadius: '4px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '1px 7px',
+                          marginLeft: '8px',
+                        }}>
+                          OVERDUE
+                        </span>
+                      )}
+                    </div>
                     {(client as any)._practitionerName !== undefined && (
                       <span style={{
                         display: 'inline-flex',
