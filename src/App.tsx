@@ -15,6 +15,7 @@ import AdminClientDetailPage from './pages/AdminClientDetailPage';
 import AdminSettingsPage from './pages/AdminSettingsPage';
 import EditClientPage from './pages/EditClientPage';
 import AdminAnalyticsPage from './pages/AdminAnalyticsPage';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
   return (
@@ -26,7 +27,7 @@ export default function App() {
         <Route path="/app/register" element={<ClientRegisterPage />} />
         <Route path="/admin/login" element={<PractitionerLoginPage />} />
 
-        <Route path="/app" element={<ClientLayout />}>
+        <Route path="/app" element={<ErrorBoundary><ClientLayout /></ErrorBoundary>}>
           <Route index element={<Navigate to="checkin" replace />} />
           <Route path="checkin" element={<CheckInPage />} />
           <Route path="query" element={<QueryPage />} />
@@ -34,7 +35,7 @@ export default function App() {
           <Route path="progress" element={<ClientProgressPage />} />
         </Route>
 
-        <Route path="/admin" element={<AdminLayout />}>
+        <Route path="/admin" element={<ErrorBoundary><AdminLayout /></ErrorBoundary>}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboardPage />} />
           <Route path="alerts" element={<AdminAlertsPage />} />

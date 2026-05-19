@@ -20,11 +20,9 @@ export default function TimelinePage() {
         setCheckIns(cis);
         const syms = (await getSymptoms(client.id)).filter((s) => s.active);
         setSymptoms(syms);
+        const allEntries = await Promise.all(syms.map(s => getSymptomEntriesBySymptom(s.id)));
         const data: Record<string, number[]> = {};
-        for (const sym of syms) {
-          const entries = await getSymptomEntriesBySymptom(sym.id);
-          data[sym.id] = entries.map((e) => e.severity);
-        }
+        syms.forEach((s, i) => { data[s.id] = allEntries[i].map(e => e.severity); });
         setSymptomData(data);
       })();
     }
@@ -41,11 +39,7 @@ export default function TimelinePage() {
         <p>{checkIns.length} check-in{checkIns.length !== 1 ? 's' : ''} recorded</p>
       </div>
 
-      {painData.length > 1 && (
-        <div className="card chart-card">
-          <MiniChart data={painData} label="Pain trend over time" />
-        </div>
-      )}
+      {painData.length > 1 && <div className="card chart-card"><MiniChart data={painData} label="Pain trend over time" /></div>}
 
       {symptoms.length > 0 && (
         <div className="card chart-card">
@@ -53,13 +47,7 @@ export default function TimelinePage() {
           {symptoms.map((sym) => {
             const data = symptomData[sym.id] || [];
             if (data.length === 0) return null;
-            return (
-              <MiniChart
-                key={sym.id}
-                data={data}
-                label={sym.name}
-              />
-            );
+            return <MiniChart key={sym.id} data={data} label={sym.name} />;
           })}
         </div>
       )}
@@ -68,11 +56,7 @@ export default function TimelinePage() {
         {checkIns.map((ci) => {
           const expanded = expandedId === ci.id;
           return (
-            <div
-              key={ci.id}
-              className={`timeline-entry ${ci.flagged ? 'flagged' : ''} ${expanded ? 'expanded' : ''}`}
-              onClick={() => setExpandedId(expanded ? null : ci.id)}
-            >
+            <div key={ci.id} className={`timeline-entry ${ci.flagged ? 'flagged' : ''} ${expanded ? 'expanded' : ''}`} onClick={() => setExpandedId(expanded ? null : ci.id)}>
               <div className="timeline-entry-header">
                 <div className="entry-date">
                   <strong>{formatDate(ci.created_at)}</strong>
@@ -81,56 +65,24 @@ export default function TimelinePage() {
                 <div className="entry-badges">
                   {ci.flagged && <AlertTriangle size={16} color="#f59e0b" />}
                   <span className="feeling-badge">{feelingEmoji(ci.overall_feeling)}</span>
-                  <span
-                    className="change-badge"
-                    style={{ color: changeColor(ci.symptom_change) }}
-                  >
-                    {changeLabel(ci.symptom_change)}
-                  </span>
+                  <span className="change-badge" style={{ color: changeColor(ci.symptom_change) }}>{changeLabel(ci.symptom_change)}</span>
                 </div>
               </div>
-
               <div className="entry-metrics">
-                <div className="metric">
-                  <span className="metric-label">Pain</span>
-                  <span className="metric-value" style={{ color: painColor(ci.pain_level) }}>
-                    {ci.pain_level}/10
-                  </span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">Sleep</span>
-                  <span className="metric-value">{ci.sleep_quality}/5</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">Stress</span>
-                  <span className="metric-value">{ci.stress_level}/5</span>
-                </div>
+                <div className="metric"><span className="metric-label">Pain</span><span className="metric-value" style={{ color: painColor(ci.pain_level) }}>{ci.pain_level}/10</span></div>
+                <div className="metric"><span className="metric-label">Sleep</span><span className="metric-value">{ci.sleep_quality}/5</span></div>
+                <div className="metric"><span className="metric-label">Stress</span><span className="metric-value">{ci.stress_level}/5</span></div>
               </div>
-
               {expanded && (
                 <div className="entry-details">
-                  {ci.medication_taken && (
-                    <div className="detail-row">
-                      <Pill size={14} /> Medication taken
-                    </div>
-                  )}
-                  {ci.notes && (
-                    <div className="detail-row notes-row">
-                      <MessageSquare size={14} />
-                      <span>{ci.notes}</span>
-                    </div>
-                  )}
+                  {ci.medication_taken && <div className="detail-row"><Pill size={14} /> Medication taken</div>}
+                  {ci.notes && <div className="detail-row notes-row"><MessageSquare size={14} /><span>{ci.notes}</span></div>}
                 </div>
               )}
             </div>
           );
         })}
-
-        {checkIns.length === 0 && (
-          <div className="empty-state">
-            <p>No check-ins yet. Complete your first daily check-in to start tracking.</p>
-          </div>
-        )}
+        {checkIns.length === 0 && <div className="empty-state"><p>No check-ins yet. Complete your first daily check-in to start tracking.</p></div>}
       </div>
     </div>
   );

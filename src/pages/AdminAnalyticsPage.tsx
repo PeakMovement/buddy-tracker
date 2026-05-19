@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { getDeviceVisits, getClients, type DeviceVisit } from '../lib/store';
+import { getDeviceVisits, getClients, getClinicalStats, type DeviceVisit } from '../lib/store';
 import { getLoggedInPractitionerId } from '../hooks/usePractitioner';
 import { getPractitioner } from '../lib/store';
 import type { Client } from '../types/database';
 import { formatDate } from '../lib/utils';
-import { Monitor, Smartphone, Activity } from 'lucide-react';
+import { Monitor, Smartphone, Activity, AlertTriangle, TrendingUp, Bell } from 'lucide-react';
 
 interface DeviceStats {
   mobile: number;
@@ -16,6 +16,14 @@ interface DeviceStats {
   clientMap: Record<string, string>;
 }
 
+interface ClinicalOverview {
+  weeklyCheckIns: number;
+  flaggedThisWeek: number;
+  unreadAlerts: number;
+  avgPainLevel: number;
+  checkInsByDay: { date: string; count: number }[];
+}
+
 function computeStats(visits: DeviceVisit[], clientMap: Record<string, string>): DeviceStats {
   const mobile = visits.filter((v) => v.device_type === 'mobile').length;
   const desktop = visits.filter((v) => v.device_type !== 'mobile').length;
@@ -24,15 +32,7 @@ function computeStats(visits: DeviceVisit[], clientMap: Record<string, string>):
   for (const v of visits) {
     pageBreakdown[v.page] = (pageBreakdown[v.page] || 0) + 1;
   }
-  return {
-    mobile,
-    desktop,
-    total: visits.length,
-    uniqueClients,
-    pageBreakdown,
-    recentVisits: visits.slice(0, 30),
-    clientMap,
-  };
+  return { mobile, desktop, total: visits.length, uniqueClients, pageBreakdown, recentVisits: visits.slice(0, 30), clientMap };
 }
 
 function StatPill({ label, value, icon }: { label: string; value: number | string; icon?: React.ReactNode }) {
@@ -45,9 +45,33 @@ function StatPill({ label, value, icon }: { label: string; value: number | strin
   );
 }
 
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function CheckInBarChart({ byDay }: { byDay: { date: string; count: number }[] }) {
+  const maxCount = Math.max(...byDay.map(d => d.count), 1);
+  const BAR_W = 30, X_STEP = 40, CHART_H = 60, LABEL_H = 20, H = CHART_H + LABEL_H, W = 280;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
+      {byDay.map((d, i) => {
+        const barH = d.count > 0 ? Math.max(4, (d.count / maxCount) * CHART_H) : 0;
+        const x = i * X_STEP + (X_STEP - BAR_W) / 2;
+        const y = CHART_H - barH;
+        const dayLabel = DAY_LABELS[new Date(d.date + 'T12:00:00').getDay()];
+        return (
+          <g key={d.date}>
+            {barH > 0 && <rect x={x} y={y} width={BAR_W} height={barH} fill="#3b82f6" rx={3} />}
+            <text x={x + BAR_W / 2} y={H - 4} fontSize={9} fill="#94a3b8" textAnchor="middle">{dayLabel}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function AdminAnalyticsPage() {
   const practitionerId = getLoggedInPractitionerId()!;
   const [stats, setStats] = useState<DeviceStats | null>(null);
+  const [clinical, setClinical] = useState<ClinicalOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedClient, setSelectedClient] = useState<string>('all');
   const [clients, setClients] = useState<Client[]>([]);
@@ -55,12 +79,17 @@ export default function AdminAnalyticsPage() {
   useEffect(() => {
     (async () => {
       const p = await getPractitioner(practitionerId);
-      const allClients = p?.is_admin ? await getClients() : await getClients(practitionerId);
+      const isAdmin = p?.is_admin ?? false;
+      const allClients = isAdmin ? await getClients() : await getClients(practitionerId);
       setClients(allClients);
       const clientMap: Record<string, string> = {};
       allClients.forEach((c) => { clientMap[c.id] = c.full_name; });
-      const visits = await getDeviceVisits();
+      const [visits, clinicalData] = await Promise.all([
+        getDeviceVisits(),
+        getClinicalStats(practitionerId, isAdmin),
+      ]);
       setStats(computeStats(visits, clientMap));
+      setClinical(clinicalData);
       setLoading(false);
     })();
   }, [practitionerId]);
@@ -85,22 +114,37 @@ export default function AdminAnalyticsPage() {
   return (
     <div className="admin-page">
       <div className="page-header">
-        <h2>Device Analytics</h2>
-        <p>Client access patterns and device usage</p>
+        <h2>Analytics</h2>
+        <p>Clinical activity and device usage</p>
       </div>
+
+      {clinical && (
+        <>
+          <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Clinical Overview — Last 7 Days
+          </h3>
+          <div className="report-stats" style={{ marginBottom: '12px' }}>
+            <StatPill label="Check-ins" value={clinical.weeklyCheckIns} icon={<Activity size={16} color="#2563eb" />} />
+            <StatPill label="Flagged" value={clinical.flaggedThisWeek} icon={<AlertTriangle size={16} color="#f59e0b" />} />
+            <StatPill label="Unread Alerts" value={clinical.unreadAlerts} icon={<Bell size={16} color="#ef4444" />} />
+            <StatPill label="Avg Pain" value={clinical.avgPainLevel} icon={<TrendingUp size={16} color="#10b981" />} />
+          </div>
+          <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>Daily Check-ins</h3>
+            <CheckInBarChart byDay={clinical.checkInsByDay} />
+          </div>
+        </>
+      )}
+
+      <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        Device Analytics
+      </h3>
 
       {clients.length > 0 && (
         <div style={{ marginBottom: '16px' }}>
-          <select
-            className="login-input"
-            style={{ marginBottom: 0 }}
-            value={selectedClient}
-            onChange={(e) => handleClientFilter(e.target.value)}
-          >
+          <select className="login-input" style={{ marginBottom: 0 }} value={selectedClient} onChange={(e) => handleClientFilter(e.target.value)}>
             <option value="all">All Clients</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.full_name}</option>
-            ))}
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.full_name}</option>)}
           </select>
         </div>
       )}
@@ -109,9 +153,7 @@ export default function AdminAnalyticsPage() {
         <div className="empty-state">
           <Activity size={40} color="#94a3b8" />
           <p style={{ marginTop: '12px' }}>No device visits recorded yet.</p>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Visits are tracked when clients use the app.
-          </p>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Visits are tracked when clients use the app.</p>
         </div>
       ) : (
         <>
@@ -171,23 +213,10 @@ export default function AdminAnalyticsPage() {
           <div className="card" style={{ padding: '16px' }}>
             <h3 style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>Recent Visits</h3>
             {s.recentVisits.map((v) => (
-              <div
-                key={v.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '8px 0',
-                  borderBottom: '1px solid var(--border)',
-                  fontSize: '12px',
-                  gap: '8px',
-                }}
-              >
+              <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: '12px', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   {v.device_type === 'mobile' ? <Smartphone size={12} color="#2563eb" /> : <Monitor size={12} color="#16a34a" />}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
-                    {s.clientMap[v.client_id] ?? 'Unknown'}
-                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{s.clientMap[v.client_id] ?? 'Unknown'}</span>
                   <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>{v.page}</span>
                 </div>
                 <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{formatDate(v.visited_at)}</span>

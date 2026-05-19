@@ -4,16 +4,7 @@ import { getCheckIns, getSymptoms, getSymptomEntriesBySymptom, generateReport } 
 import type { CheckIn, Symptom, FollowUpReport } from '../types/database';
 import MiniChart from '../components/MiniChart';
 import { trendLabel, trendColor, painColor } from '../lib/utils';
-import {
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  Activity,
-  Moon,
-  Brain,
-  Award,
-  AlertTriangle,
-} from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, Activity, Moon, Brain, Award, AlertTriangle } from 'lucide-react';
 
 function ComplianceBar({ label, value }: { label: string; value: number }) {
   const color = value >= 70 ? 'var(--success)' : value >= 40 ? '#f59e0b' : 'var(--danger)';
@@ -47,11 +38,9 @@ export default function ClientProgressPage() {
         setCheckIns(cis);
         const syms = (await getSymptoms(client.id)).filter((s) => s.active);
         setSymptoms(syms);
+        const allEntries = await Promise.all(syms.map(s => getSymptomEntriesBySymptom(s.id)));
         const data: Record<string, number[]> = {};
-        for (const sym of syms) {
-          const entries = await getSymptomEntriesBySymptom(sym.id);
-          data[sym.id] = entries.map((e) => e.severity);
-        }
+        syms.forEach((s, i) => { data[s.id] = allEntries[i].map(e => e.severity); });
         setSymptomData(data);
         setLoading(false);
       })();
@@ -74,15 +63,11 @@ export default function ClientProgressPage() {
 
   const s = report.summary;
   const m = report.compliance_metrics;
-  const TrendIcon = s.overall_trend === 'improving' ? TrendingUp
-    : s.overall_trend === 'declining' ? TrendingDown
-    : Minus;
+  const TrendIcon = s.overall_trend === 'improving' ? TrendingUp : s.overall_trend === 'declining' ? TrendingDown : Minus;
 
   return (
     <div className="progress-page">
-      <div className="page-header">
-        <h2>Your Progress</h2>
-      </div>
+      <div className="page-header"><h2>Your Progress</h2></div>
 
       <div className="progress-trend-card card">
         <div className="trend-display">
@@ -90,27 +75,16 @@ export default function ClientProgressPage() {
             <TrendIcon size={24} />
           </div>
           <div>
-            <span className="trend-label" style={{ color: trendColor(s.overall_trend) }}>
-              {trendLabel(s.overall_trend)}
-            </span>
+            <span className="trend-label" style={{ color: trendColor(s.overall_trend) }}>{trendLabel(s.overall_trend)}</span>
             <span className="trend-subtext">Overall trend based on your check-ins</span>
           </div>
         </div>
       </div>
 
       <div className="report-stats">
-        <div className="stat-card">
-          <span className="stat-value">{report.total_check_ins}</span>
-          <span className="stat-label">Check-ins</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value" style={{ color: painColor(s.avg_pain_level) }}>{s.avg_pain_level}</span>
-          <span className="stat-label">Avg Pain</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-value">{report.compliance_rate}%</span>
-          <span className="stat-label">Consistency</span>
-        </div>
+        <div className="stat-card"><span className="stat-value">{report.total_check_ins}</span><span className="stat-label">Check-ins</span></div>
+        <div className="stat-card"><span className="stat-value" style={{ color: painColor(s.avg_pain_level) }}>{s.avg_pain_level}</span><span className="stat-label">Avg Pain</span></div>
+        <div className="stat-card"><span className="stat-value">{report.compliance_rate}%</span><span className="stat-label">Consistency</span></div>
       </div>
 
       <div className="card chart-card">
@@ -119,16 +93,8 @@ export default function ClientProgressPage() {
       </div>
 
       <div className="report-stats">
-        <div className="stat-card">
-          <Moon size={16} color="#2563eb" />
-          <span className="stat-value">{s.avg_sleep_quality}/5</span>
-          <span className="stat-label">Avg Sleep</span>
-        </div>
-        <div className="stat-card">
-          <Brain size={16} color="#2563eb" />
-          <span className="stat-value">{s.avg_stress_level}/5</span>
-          <span className="stat-label">Avg Stress</span>
-        </div>
+        <div className="stat-card"><Moon size={16} color="#2563eb" /><span className="stat-value">{s.avg_sleep_quality}/5</span><span className="stat-label">Avg Sleep</span></div>
+        <div className="stat-card"><Brain size={16} color="#2563eb" /><span className="stat-value">{s.avg_stress_level}/5</span><span className="stat-label">Avg Stress</span></div>
       </div>
 
       <div className="card" style={{ padding: '16px', marginBottom: '12px' }}>
@@ -145,6 +111,14 @@ export default function ClientProgressPage() {
             {report.compliance_rate}%
           </span>
         </div>
+        {s.recommendations.length > 0 && (
+          <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+            <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Recommendations</p>
+            <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {s.recommendations.map((rec, i) => <li key={i} style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{rec}</li>)}
+            </ul>
+          </div>
+        )}
       </div>
 
       {symptoms.length > 0 && (
@@ -165,9 +139,7 @@ export default function ClientProgressPage() {
             <div key={i} className="symptom-change-row">
               <span className="sc-name">{sc.symptom_name}</span>
               <span className="sc-values">{sc.start_severity} → {sc.end_severity}</span>
-              <span className="sc-trend" style={{ color: trendColor(sc.trend) }}>
-                {trendLabel(sc.trend)}
-              </span>
+              <span className="sc-trend" style={{ color: trendColor(sc.trend) }}>{trendLabel(sc.trend)}</span>
             </div>
           ))}
         </div>
@@ -179,9 +151,7 @@ export default function ClientProgressPage() {
             <AlertTriangle size={14} /> Notes
           </h3>
           <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {s.recommendations.map((rec, i) => (
-              <li key={i} style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{rec}</li>
-            ))}
+            {s.recommendations.map((rec, i) => <li key={i} style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{rec}</li>)}
           </ul>
         </div>
       )}

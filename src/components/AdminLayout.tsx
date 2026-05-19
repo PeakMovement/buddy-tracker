@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Users, Bell, Settings, LogOut, UserPlus, BarChart2, Menu, X, ChevronRight } from 'lucide-react';
 import { getLoggedInPractitionerId, logoutPractitioner } from '../hooks/usePractitioner';
+import { supabase } from '../lib/supabase';
 
 const ADMIN_NAV = [
   { to: '/admin/dashboard', icon: Users, label: 'Clients', shortcut: '1' },
@@ -12,13 +13,8 @@ const ADMIN_NAV = [
 ];
 
 const BREADCRUMB_MAP: Record<string, string> = {
-  dashboard: 'Clients',
-  alerts: 'Alerts',
-  'add-client': 'Add Client',
-  analytics: 'Analytics',
-  settings: 'Settings',
-  client: 'Client Detail',
-  edit: 'Edit Client',
+  dashboard: 'Clients', alerts: 'Alerts', 'add-client': 'Add Client',
+  analytics: 'Analytics', settings: 'Settings', client: 'Client Detail', edit: 'Edit Client',
 };
 
 function getBreadcrumbs(pathname: string) {
@@ -32,9 +28,7 @@ function getBreadcrumbs(pathname: string) {
   if (parts[2] && parts[1] === 'client') {
     crumbs.push({ label: 'Detail', path: parts[3] ? `/${parts.slice(0, 3).join('/')}` : undefined });
   }
-  if (parts[3] === 'edit') {
-    crumbs.push({ label: 'Edit' });
-  }
+  if (parts[3] === 'edit') crumbs.push({ label: 'Edit' });
   return crumbs;
 }
 
@@ -43,10 +37,24 @@ export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
   useEffect(() => {
-    setSidebarOpen(false);
-  }, [location.pathname]);
+    if (!practitionerId) return;
+    async function fetchUnread() {
+      const { count } = await supabase
+        .from('contact_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_read', false)
+        .eq('practitioner_id', practitionerId!);
+      setUnreadCount(count ?? 0);
+    }
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => clearInterval(interval);
+  }, [practitionerId]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.altKey) {
@@ -61,9 +69,7 @@ export default function AdminLayout() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  if (!practitionerId) {
-    return <Navigate to="/admin/login" replace />;
-  }
+  if (!practitionerId) return <Navigate to="/admin/login" replace />;
 
   function handleLogout() {
     logoutPractitioner();
@@ -74,13 +80,7 @@ export default function AdminLayout() {
 
   return (
     <div className="admin-shell">
-      {sidebarOpen && (
-        <div
-          className="sidebar-overlay"
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
-      )}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 
       <aside className={`admin-sidebar${sidebarOpen ? ' open' : ''}`} aria-label="Admin navigation">
         <div className="sidebar-brand">
@@ -89,77 +89,54 @@ export default function AdminLayout() {
             <span className="sidebar-brand-title">Buddy Admin</span>
             <span className="sidebar-brand-sub">Practitioner Portal</span>
           </div>
-          <button
-            className="sidebar-close-btn"
-            onClick={() => setSidebarOpen(false)}
-            aria-label="Close menu"
-          >
-            <X size={18} />
-          </button>
+          <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} aria-label="Close menu"><X size={18} /></button>
         </div>
 
         <nav className="sidebar-nav" aria-label="Admin sections">
           {ADMIN_NAV.map(({ to, icon: Icon, label, shortcut }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`}
-              title={`${label} (Alt+${shortcut})`}
-            >
+            <NavLink key={to} to={to} className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`} title={`${label} (Alt+${shortcut})`}>
               <Icon size={18} />
               <span className="sidebar-nav-label">{label}</span>
-              <span className="sidebar-shortcut">Alt+{shortcut}</span>
+              {label === 'Alerts' && unreadCount > 0 ? (
+                <span style={{ background: '#ef4444', color: '#fff', borderRadius: '999px', fontSize: '10px', fontWeight: 700, padding: '1px 6px', marginLeft: 'auto' }}>
+                  {unreadCount}
+                </span>
+              ) : (
+                <span className="sidebar-shortcut">Alt+{shortcut}</span>
+              )}
             </NavLink>
           ))}
         </nav>
 
         <div className="sidebar-footer">
-          <button className="sidebar-logout-btn" onClick={handleLogout}>
-            <LogOut size={16} />
-            <span>Log out</span>
-          </button>
+          <button className="sidebar-logout-btn" onClick={handleLogout}><LogOut size={16} /><span>Log out</span></button>
         </div>
       </aside>
 
       <div className="admin-main-wrap">
         <header className="admin-topbar">
           <div className="admin-topbar-left">
-            <button
-              className="btn btn-ghost btn-sm hamburger-btn"
-              onClick={() => setSidebarOpen(v => !v)}
-              aria-label="Toggle sidebar"
-            >
-              <Menu size={20} />
-            </button>
+            <button className="btn btn-ghost btn-sm hamburger-btn" onClick={() => setSidebarOpen(v => !v)} aria-label="Toggle sidebar"><Menu size={20} /></button>
             <div className="topbar-brand-mobile">
               <div className="brand-icon" style={{ width: 28, height: 28, fontSize: 14 }}>B</div>
               <span className="topbar-brand-name">Buddy Admin</span>
             </div>
           </div>
-
           <nav className="admin-breadcrumb" aria-label="Breadcrumb">
             {breadcrumbs.map((crumb, i) => (
               <span key={i} className="breadcrumb-trail">
                 {i > 0 && <ChevronRight size={12} className="breadcrumb-chevron" />}
                 {crumb.path ? (
-                  <button className="breadcrumb-link" onClick={() => navigate(crumb.path!)}>
-                    {crumb.label}
-                  </button>
+                  <button className="breadcrumb-link" onClick={() => navigate(crumb.path!)}>{crumb.label}</button>
                 ) : (
                   <span className="breadcrumb-current">{crumb.label}</span>
                 )}
               </span>
             ))}
           </nav>
-
-          <button className="btn btn-ghost btn-sm logout-btn topbar-logout" onClick={handleLogout} title="Log out">
-            <LogOut size={16} />
-          </button>
+          <button className="btn btn-ghost btn-sm logout-btn topbar-logout" onClick={handleLogout} title="Log out"><LogOut size={16} /></button>
         </header>
-
-        <main className="admin-content">
-          <Outlet />
-        </main>
+        <main className="admin-content"><Outlet /></main>
       </div>
     </div>
   );

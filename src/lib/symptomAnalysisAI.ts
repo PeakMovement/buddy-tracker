@@ -25,36 +25,34 @@ export interface CombinedTriageResult {
   confidence_score: number;
 }
 
-const NEVER_SUPPRESS_PHRASES = [
-  'suicidal',
-  'self-harm',
-  'self harm',
-  'want to die',
-  'heart attack',
-  'stroke',
-  'cauda equina',
-  'cannot breathe',
-  "can't breathe",
-  'cant breathe',
-  'anaphylaxis',
-  'not breathing',
-  'stopped breathing',
-  'unconscious',
-  'loss of consciousness',
-  'seizure',
-  'facial drooping',
-  'slurred speech',
+const HARD_OVERRIDE_PHRASES = [
+  'chest pain', 'heart attack', 'cannot breathe', "can't breathe", 'stroke',
+  'facial drooping', 'slurred speech', 'paralysis', 'unconscious', 'loss of consciousness',
+  'seizure', 'cauda equina', 'saddle anaesthesia', 'loss of bladder control',
+  'loss of bowel control', 'suicidal', 'want to die', 'self harm', 'self-harm',
+  'anaphylaxis', 'throat closing', 'coughing blood', 'vomiting blood',
+  'worst headache of my life', 'thunderclap headache', 'sudden vision loss',
+  'sudden blindness', 'stabbed', 'gunshot',
 ];
+
+const ATTRIBUTION_MARKERS = [
+  'my friend', 'my mother', 'my wife', 'my partner', 'my husband', 'my sister', 'my brother',
+];
+
+function isAttributed(text: string, matchIndex: number): boolean {
+  const window = text.slice(Math.max(0, matchIndex - 80), matchIndex).toLowerCase();
+  return ATTRIBUTION_MARKERS.some((m) => window.includes(m));
+}
 
 function buildSuggestedNextStep(urgency: UrgencyTier, aiRationale: string | null, practitionerName: string): string {
   if (aiRationale && aiRationale.length > 20) return aiRationale;
   switch (urgency) {
     case 'emergency':
-      return 'These symptoms may require immediate emergency attention. Please call 112 or go to your nearest emergency department now.';
+      return 'These symptoms may require immediate emergency attention. Please call your lead physiotherapist or go to your nearest emergency department now.';
     case 'urgent':
       return `Please contact ${practitionerName} today. These symptoms warrant prompt review.`;
     case 'soon':
-      return `Schedule an appointment with ${practitionerName} within the next 24\u201348 hours.`;
+      return `Schedule an appointment with ${practitionerName} within the next 24–48 hours.`;
     case 'monitor':
       return `Continue monitoring your symptoms. If they worsen or persist, contact ${practitionerName}.`;
     case 'routine':
@@ -99,107 +97,79 @@ export async function analyzeSymptomCombined(
   const pName = practitionerName ?? 'your professional';
   const lower = text.toLowerCase();
 
-  // Layer 1 — Never-suppress check
-  for (const phrase of NEVER_SUPPRESS_PHRASES) {
-    if (lower.includes(phrase)) {
+  // Layer 1 — Hard override: critical phrase check with attribution guard
+  for (const phrase of HARD_OVERRIDE_PHRASES) {
+    const idx = lower.indexOf(phrase);
+    if (idx !== -1 && !isAttributed(text, idx)) {
       return {
-        red_flag_detected: true,
-        severity: 10,
-        urgency: 'emergency',
-        should_notify_practitioner: true,
-        matched_score: 10,
-        matched_symptom: phrase,
+        red_flag_detected: true, severity: 10, urgency: 'emergency', should_notify_practitioner: true,
+        matched_score: 10, matched_symptom: phrase,
         suggested_next_step: buildSuggestedNextStep('emergency', null, pName),
-        ai_rationale: null,
-        ai_red_flags: null,
-        ai_categories: null,
-        confidence: 1,
-        negation_detected: null,
-        attribution_detected: null,
-        source: 'keyword_only',
-        confidence_score: 1,
+        ai_rationale: null, ai_red_flags: [phrase], ai_categories: null,
+        confidence: 1, negation_detected: false, attribution_detected: false,
+        source: 'keyword_only', confidence_score: 1,
       };
     }
   }
 
-  // Layer 2 — Keyword engine (safety floor)
-  const keywordResult = analyzeSymptomLocal(text, clientContext);
-  const keywordSeverity = keywordResult.severity ?? 0;
-
-  // Layer 3 — LLM call with 8-second timeout
-  let llmResult: LLMTriageResult | null = null;
+  // Layer 2 — LLM call with 15-second timeout
+  let aiResult: LLMTriageResult | null = null;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     const { data, error } = await supabase.functions.invoke('triage-query', {
       body: { query_text: text, client_context: clientContext },
     });
-
     clearTimeout(timeoutId);
-
-    if (!error && isValidLLMResult(data)) {
-      llmResult = data;
-    }
+    if (!error && isValidLLMResult(data)) aiResult = data;
   } catch {
-    // fall through to keyword-only fallback
+    // fall through to keyword fallback
   }
 
-  // Keyword-only fallback
-  if (!llmResult) {
-    const urgency = (keywordResult.urgency ?? 'routine') as UrgencyTier;
-    const severity = keywordSeverity;
+  // Fallback — LLM failed or timed out
+  if (!aiResult) {
+    const keywordFallback = analyzeSymptomLocal(text, clientContext);
+    const urgency = (keywordFallback.urgency ?? 'routine') as UrgencyTier;
+    const severity = keywordFallback.severity ?? 0;
     return {
-      red_flag_detected: keywordResult.red_flag_detected,
-      severity,
-      urgency,
+      red_flag_detected: keywordFallback.red_flag_detected, severity, urgency,
       should_notify_practitioner: severity >= 7 || urgency === 'urgent' || urgency === 'emergency',
-      matched_score: keywordResult.matched_score ?? 0,
-      matched_symptom: keywordResult.matched_symptom,
+      matched_score: keywordFallback.matched_score ?? 0, matched_symptom: keywordFallback.matched_symptom,
       suggested_next_step: buildSuggestedNextStep(urgency, null, pName),
-      ai_rationale: null,
-      ai_red_flags: null,
-      ai_categories: null,
-      confidence: null,
-      negation_detected: null,
-      attribution_detected: null,
-      source: 'keyword_only',
-      confidence_score: keywordResult.confidence_score,
+      ai_rationale: null, ai_red_flags: null, ai_categories: null, confidence: null,
+      negation_detected: null, attribution_detected: null, source: 'keyword_only',
+      confidence_score: keywordFallback.confidence_score,
     };
   }
 
-  // Merge logic
-  let finalSeverity = llmResult.severity;
-  let finalUrgency = llmResult.urgency;
+  // Layer 3 — Keyword floor: only apply if AI didn't detect negation/attribution
+  let finalSeverity = aiResult.severity;
+  let finalUrgency = aiResult.urgency;
   let source: CombinedTriageResult['source'] = 'ai_primary';
 
-  if (keywordSeverity >= 9 && llmResult.severity < 9) {
-    finalSeverity = keywordSeverity;
-    finalUrgency = 'urgent';
-    source = 'ai_with_keyword_escalation';
+  if (!aiResult.negation_detected && !aiResult.attribution_detected) {
+    const keywordResult = analyzeSymptomLocal(text, clientContext);
+    const keywordSeverity = keywordResult.severity ?? 0;
+    if (keywordSeverity > aiResult.severity) {
+      finalSeverity = keywordSeverity;
+      const urgencyMap: Record<number, UrgencyTier> = { 9: 'urgent', 10: 'urgent' };
+      finalUrgency = urgencyMap[keywordSeverity] ?? (keywordSeverity >= 7 ? 'urgent' : keywordSeverity >= 5 ? 'soon' : keywordSeverity >= 3 ? 'monitor' : 'routine');
+      source = 'ai_with_keyword_escalation';
+    }
   }
 
-  const shouldNotify =
-    llmResult.should_notify_practitioner ||
-    finalSeverity >= 7 ||
-    finalUrgency === 'urgent' ||
-    finalUrgency === 'emergency';
+  const shouldNotify = aiResult.should_notify_practitioner || finalSeverity >= 7 || finalUrgency === 'urgent' || finalUrgency === 'emergency';
 
   return {
-    red_flag_detected: keywordResult.red_flag_detected || finalSeverity >= 6,
-    severity: finalSeverity,
-    urgency: finalUrgency,
-    should_notify_practitioner: shouldNotify,
-    matched_score: keywordResult.matched_score ?? 0,
-    matched_symptom: keywordResult.matched_symptom,
-    suggested_next_step: buildSuggestedNextStep(finalUrgency, llmResult.rationale, pName),
-    ai_rationale: llmResult.rationale,
-    ai_red_flags: llmResult.red_flags.length > 0 ? llmResult.red_flags : null,
-    ai_categories: llmResult.categories.length > 0 ? llmResult.categories : null,
-    confidence: llmResult.confidence,
-    negation_detected: llmResult.negation_detected,
-    attribution_detected: llmResult.attribution_detected,
-    source,
-    confidence_score: llmResult.confidence,
+    red_flag_detected: (aiResult.red_flags.length > 0) || finalSeverity >= 6,
+    severity: finalSeverity, urgency: finalUrgency, should_notify_practitioner: shouldNotify,
+    matched_score: finalSeverity, matched_symptom: aiResult.red_flags.length > 0 ? aiResult.red_flags[0] : null,
+    suggested_next_step: buildSuggestedNextStep(finalUrgency, aiResult.rationale, pName),
+    ai_rationale: aiResult.rationale,
+    ai_red_flags: aiResult.red_flags.length > 0 ? aiResult.red_flags : null,
+    ai_categories: aiResult.categories.length > 0 ? aiResult.categories : null,
+    confidence: aiResult.confidence, negation_detected: aiResult.negation_detected,
+    attribution_detected: aiResult.attribution_detected, source,
+    confidence_score: aiResult.confidence,
   };
 }
