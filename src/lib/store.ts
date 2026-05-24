@@ -556,7 +556,7 @@ export async function generateReport(clientId: string, client?: Client): Promise
 
 export interface DeviceVisit {
   id: string;
-  client_id: string | null;
+  client_id: string;
   device_type: string;
   user_agent: string;
   screen_width: number;
@@ -626,16 +626,14 @@ export async function sendClientInvitation(
   }
 }
 
+const CHECK_IN_WEBHOOK_URL = 'https://hook.eu2.make.com/671seik11jnwfdb99uysb3dlp3mqz7kl';
+
 export async function fireCheckInWebhook(
   practitionerId: string,
   clientName: string,
   clientEmail: string
 ): Promise<void> {
-  const settings = await getWebhookSettings(practitionerId);
-  const webhookUrl = normalizeWebhookUrl(settings?.webhook_url ?? '');
-  if (!webhookUrl || !settings?.enabled) return;
-
-  await fetch(webhookUrl, {
+  await fetch(CHECK_IN_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
