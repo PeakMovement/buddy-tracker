@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getLoggedInPractitionerId } from '../hooks/usePractitioner';
-import { getPractitioner, getClients, getPractitioners, getLastCheckInDates } from '../lib/store';
+import { getPractitioner, getClients, getPractitioners, getLastCheckInDates, fireCheckInWebhook } from '../lib/store';
 import type { Client, Practitioner } from '../types/database';
 import { formatDate, formatRelativeDate } from '../lib/utils';
 import { ChevronRight, User } from 'lucide-react';
@@ -42,6 +42,7 @@ export default function AdminDashboardPage() {
   const [lastCheckIns, setLastCheckIns] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [checkInFilter, setCheckInFilter] = useState<CheckInFilter>('all');
+  const [sentCheckIns, setSentCheckIns] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     (async () => {
@@ -215,6 +216,29 @@ export default function AdminDashboardPage() {
                   <span style={{ color: lastCheckIn ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
                     Last check-in: <strong>{lastCheckIn ? formatRelativeDate(lastCheckIn) : 'Never'}</strong>
                   </span>
+                </div>
+                <div style={{ marginTop: '10px' }}>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await fireCheckInWebhook(practitionerId, client.full_name, client.email);
+                      setSentCheckIns((prev) => ({ ...prev, [client.id]: true }));
+                      setTimeout(() => setSentCheckIns((prev) => ({ ...prev, [client.id]: false })), 2000);
+                    }}
+                    style={{
+                      padding: '5px 14px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      borderRadius: '6px',
+                      border: '1.5px solid var(--primary)',
+                      background: sentCheckIns[client.id] ? 'var(--primary)' : 'transparent',
+                      color: sentCheckIns[client.id] ? '#fff' : 'var(--primary)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {sentCheckIns[client.id] ? 'Sent' : 'Check In'}
+                  </button>
                 </div>
               </div>
             );

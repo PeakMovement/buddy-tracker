@@ -6,13 +6,10 @@ import type {
   Symptom,
   SymptomEntry,
   ContactRequest,
-  DeviceVisit,
   FollowUpReport,
   SymptomChange,
   ComplianceMetrics,
 } from '../types/database';
-
-export type { DeviceVisit };
 
 export function getPractitionerDisplayName(p: Practitioner): string {
   return p.full_name || p.name;
@@ -557,6 +554,17 @@ export async function generateReport(clientId: string, client?: Client): Promise
   };
 }
 
+export interface DeviceVisit {
+  id: string;
+  client_id: string | null;
+  device_type: string;
+  user_agent: string;
+  screen_width: number;
+  screen_height: number;
+  page: string;
+  visited_at: string;
+}
+
 export async function recordDeviceVisit(clientId: string, page: string): Promise<void> {
   const deviceType = /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
   await supabase.from('device_visits').insert({
@@ -616,6 +624,28 @@ export async function sendClientInvitation(
     });
     return { success: false, error: 'Network error. Please check your connection and try again.' };
   }
+}
+
+export async function fireCheckInWebhook(
+  practitionerId: string,
+  clientName: string,
+  clientEmail: string
+): Promise<void> {
+  const settings = await getWebhookSettings(practitionerId);
+  const webhookUrl = normalizeWebhookUrl(settings?.webhook_url ?? '');
+  if (!webhookUrl || !settings?.enabled) return;
+
+  await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'check_in_reminder',
+      client_name: clientName,
+      client_email: clientEmail,
+      practitioner_id: practitionerId,
+      timestamp: new Date().toISOString(),
+    }),
+  }).catch(() => {});
 }
 
 export async function getClinicalStats(practitionerId: string, isAdmin: boolean) {
