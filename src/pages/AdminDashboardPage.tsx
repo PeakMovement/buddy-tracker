@@ -4,7 +4,7 @@ import { getLoggedInPractitionerId } from '../hooks/usePractitioner';
 import { getPractitioner, getClients, getPractitioners, getLastCheckInDates, fireCheckInWebhook } from '../lib/store';
 import type { Client, Practitioner } from '../types/database';
 import { formatDate, formatRelativeDate } from '../lib/utils';
-import { ChevronRight, User } from 'lucide-react';
+import { ChevronRight, User, Search } from 'lucide-react';
 
 const OVERDUE_DAYS: Record<string, number> = {
   daily: 1,
@@ -43,6 +43,7 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [checkInFilter, setCheckInFilter] = useState<CheckInFilter>('all');
   const [sentCheckIns, setSentCheckIns] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -76,7 +77,16 @@ export default function AdminDashboardPage() {
     return bTime - aTime;
   });
 
+  const searchTerm = search.trim().toLowerCase();
+
   const filtered = sorted.filter((c) => {
+    if (searchTerm) {
+      const matches =
+        c.full_name.toLowerCase().includes(searchTerm) ||
+        c.email.toLowerCase().includes(searchTerm) ||
+        c.primary_complaint.toLowerCase().includes(searchTerm);
+      if (!matches) return false;
+    }
     if (checkInFilter === 'all') return true;
     const bucket = getCheckInFilter(lastCheckIns[c.id]);
     if (checkInFilter === 'today') return bucket === 'today';
@@ -104,6 +114,41 @@ export default function AdminDashboardPage() {
         <h2>{practitioner?.is_admin ? 'All Clients' : 'My Clients'}</h2>
         <p>{clients.length} client{clients.length !== 1 ? 's' : ''}</p>
       </div>
+
+      {clients.length > 0 && (
+        <div style={{ position: 'relative', marginBottom: '12px' }}>
+          <Search
+            size={15}
+            style={{
+              position: 'absolute',
+              left: '11px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--text-muted)',
+              pointerEvents: 'none',
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Search by name, email or complaint..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px 8px 34px',
+              fontSize: '13px',
+              border: '1.5px solid var(--border)',
+              borderRadius: '8px',
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              outline: 'none',
+              transition: 'border-color 0.15s ease',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
+          />
+        </div>
+      )}
 
       {clients.length > 0 && (
         <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -153,7 +198,7 @@ export default function AdminDashboardPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="empty-state">
-          <p>No clients checked in in this period.</p>
+          <p>{searchTerm ? `No clients match "${search}".` : 'No clients checked in in this period.'}</p>
         </div>
       ) : (
         <div className="client-list">
