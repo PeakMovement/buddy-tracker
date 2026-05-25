@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useClientContext } from '../context/ClientContext';
-import { createCheckIn, getSymptoms, createSymptomEntry, createSymptom, createContactRequest, fireContactProfessionalWebhook } from '../lib/store';
+import { createCheckIn, getSymptoms, createSymptomEntry, createSymptom, createContactRequest, fireContactProfessionalWebhook, fireCheckInWebhook } from '../lib/store';
 import { getLoggedInClientId } from '../hooks/useClient';
 import { analyzeSymptomRealTime } from '../lib/symptomAnalysis';
 import { supabase } from '../lib/supabase';
@@ -9,11 +9,11 @@ import { Plus } from 'lucide-react';
 type Step = 'feeling' | 'symptoms' | 'details' | 'done';
 
 const FEELING_OPTIONS = [
-  { value: 5, label: 'Great', emoji: '\uD83D\uDE04' },
-  { value: 4, label: 'Good', emoji: '\uD83D\uDE42' },
-  { value: 3, label: 'Okay', emoji: '\uD83D\uDE10' },
-  { value: 2, label: 'Bad', emoji: '\uD83D\uDE15' },
-  { value: 1, label: 'Terrible', emoji: '\uD83D\uDE14' },
+  { value: 5, label: 'Great', emoji: '😄' },
+  { value: 4, label: 'Good', emoji: '🙂' },
+  { value: 3, label: 'Okay', emoji: '😐' },
+  { value: 2, label: 'Bad', emoji: '😕' },
+  { value: 1, label: 'Terrible', emoji: '😔' },
 ];
 
 const CHANGE_OPTIONS = [
@@ -125,6 +125,9 @@ export default function CheckInPage() {
         } catch { /* never block success */ }
       }
       await refreshClient();
+      if (client?.practitioner_id) {
+        fireCheckInWebhook(client.practitioner_id, client.full_name, client.email).catch(() => {});
+      }
       setStep('done');
     } catch {
       setError('Failed to save check-in. Please try again.');
@@ -140,11 +143,13 @@ export default function CheckInPage() {
       <div className="checkin-page">
         <div className="checkin-card">
           <div className="step-content" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>\u2705</div>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
             <h2>Check-in saved!</h2>
             <p className="subtext">Your progress has been recorded.</p>
             <div className="step-actions" style={{ marginTop: '24px' }}>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setStep('feeling')}>New Check-in</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setStep('feeling')}>
+                New Check-in
+              </button>
             </div>
           </div>
         </div>
@@ -161,7 +166,11 @@ export default function CheckInPage() {
             <p className="subtext">Rate your overall wellbeing</p>
             <div className="feeling-grid">
               {FEELING_OPTIONS.map((opt) => (
-                <button key={opt.value} className={`feeling-btn ${feeling === opt.value ? 'selected' : ''}`} onClick={() => setFeeling(opt.value)}>
+                <button
+                  key={opt.value}
+                  className={`feeling-btn ${feeling === opt.value ? 'selected' : ''}`}
+                  onClick={() => setFeeling(opt.value)}
+                >
                   <span className="feeling-emoji">{opt.emoji}</span>
                   <span className="feeling-label">{opt.label}</span>
                 </button>
@@ -171,12 +180,20 @@ export default function CheckInPage() {
               <p className="subtext" style={{ marginBottom: '8px' }}>How have your symptoms changed?</p>
               <div className="change-grid">
                 {CHANGE_OPTIONS.map((opt) => (
-                  <button key={opt.value} className={`change-btn ${change === opt.value ? 'selected' : ''}`} onClick={() => setChange(opt.value)}>{opt.label}</button>
+                  <button
+                    key={opt.value}
+                    className={`change-btn ${change === opt.value ? 'selected' : ''}`}
+                    onClick={() => setChange(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
                 ))}
               </div>
             </div>
             <div className="step-actions">
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={goToSymptoms}>Next</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={goToSymptoms}>
+                Next
+              </button>
             </div>
           </div>
         </div>
@@ -191,29 +208,58 @@ export default function CheckInPage() {
           <div className="step-content">
             <h2>Rate your symptoms</h2>
             <p className="subtext">Severity from 1 (mild) to 10 (severe)</p>
-            {symptoms.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>No tracked symptoms yet. Add one below.</p>}
+
+            {symptoms.length === 0 && (
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                No tracked symptoms yet. Add one below.
+              </p>
+            )}
+
             {symptoms.map((sym) => (
               <div key={sym.id} style={{ marginBottom: '16px' }}>
                 <label style={{ fontSize: '14px', fontWeight: '500', display: 'block', marginBottom: '4px' }}>
                   {sym.name}: <strong>{symptomSeverities[sym.id] ?? 0}</strong>/10
                 </label>
-                <input type="range" min={1} max={10} value={symptomSeverities[sym.id] ?? 0}
-                  onChange={(e) => setSymptomSeverities((prev) => ({ ...prev, [sym.id]: Number(e.target.value) }))}
-                  style={{ width: '100%' }} />
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  value={symptomSeverities[sym.id] ?? 0}
+                  onChange={(e) =>
+                    setSymptomSeverities((prev) => ({ ...prev, [sym.id]: Number(e.target.value) }))
+                  }
+                  style={{ width: '100%' }}
+                />
               </div>
             ))}
+
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <input className="login-input" style={{ flex: 1, marginBottom: 0 }} placeholder="Add symptom..." value={newSymptom}
-                onChange={(e) => setNewSymptom(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddSymptom()} />
-              <button className="btn btn-ghost" onClick={handleAddSymptom} disabled={addingSymptom || !newSymptom.trim()}><Plus size={16} /></button>
+              <input
+                className="login-input"
+                style={{ flex: 1, marginBottom: 0 }}
+                placeholder="Add symptom..."
+                value={newSymptom}
+                onChange={(e) => setNewSymptom(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddSymptom()}
+              />
+              <button className="btn btn-ghost" onClick={handleAddSymptom} disabled={addingSymptom || !newSymptom.trim()}>
+                <Plus size={16} />
+              </button>
             </div>
+
             {symptoms.length > 0 && Object.values(symptomSeverities).some(v => v === 0) && (
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '8px' }}>Slide each symptom to rate it before continuing</p>
             )}
             <div className="step-actions" style={{ marginTop: '20px' }}>
               <button className="btn btn-ghost" onClick={() => setStep('feeling')}>Back</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setStep('details')}
-                disabled={symptoms.length > 0 && Object.values(symptomSeverities).some(v => v === 0)}>Next</button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => setStep('details')}
+                disabled={symptoms.length > 0 && Object.values(symptomSeverities).some(v => v === 0)}
+              >
+                Next
+              </button>
             </div>
           </div>
         </div>
@@ -226,24 +272,44 @@ export default function CheckInPage() {
       <div className="checkin-card">
         <div className="step-content">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div><h2>A little more detail</h2><p className="subtext">Pain, sleep, stress and notes</p></div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right', maxWidth: '130px', lineHeight: '1.4', marginTop: '4px', flexShrink: 0 }}>Optional — helps holistically track your wellbeing</p>
+            <div>
+              <h2>A little more detail</h2>
+              <p className="subtext">Pain, sleep, stress and notes</p>
+            </div>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right', maxWidth: '130px', lineHeight: '1.4', marginTop: '4px', flexShrink: 0 }}>
+              Optional — helps holistically track your wellbeing
+            </p>
           </div>
+
           <label className="slider-label">Pain level: <strong>{painLevel}</strong>/10</label>
           <input type="range" min={0} max={10} value={painLevel} onChange={(e) => setPainLevel(Number(e.target.value))} style={{ width: '100%', marginBottom: '16px' }} />
+
           <label className="slider-label">Sleep quality: <strong>{sleepQuality}</strong>/5</label>
           <input type="range" min={1} max={5} value={sleepQuality} onChange={(e) => setSleepQuality(Number(e.target.value))} style={{ width: '100%', marginBottom: '16px' }} />
+
           <label className="slider-label">Stress level: <strong>{stressLevel}</strong>/5</label>
           <input type="range" min={1} max={5} value={stressLevel} onChange={(e) => setStressLevel(Number(e.target.value))} style={{ width: '100%', marginBottom: '16px' }} />
+
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', marginBottom: '16px', cursor: 'pointer' }}>
             <input type="checkbox" checked={medicationTaken} onChange={(e) => setMedicationTaken(e.target.checked)} />
             Medication taken today
           </label>
-          <textarea className="notes-input" placeholder="Any additional notes..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+
+          <textarea
+            className="notes-input"
+            placeholder="Any additional notes..."
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+          />
+
           {error && <p className="login-error">{error}</p>}
+
           <div className="step-actions">
             <button className="btn btn-ghost" onClick={() => setStep('symptoms')}>Back</button>
-            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving...' : 'Save Check-in'}</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSubmit} disabled={submitting}>
+              {submitting ? 'Saving...' : 'Save Check-in'}
+            </button>
           </div>
         </div>
       </div>
