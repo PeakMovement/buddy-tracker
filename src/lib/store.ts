@@ -86,6 +86,7 @@ export async function updateClient(
 export async function createClient(payload: {
   full_name: string;
   email: string;
+  phone?: string;
   practitioner_id: string;
   login_code: string;
   primary_complaint: string;
@@ -117,6 +118,22 @@ export async function getLastCheckInDates(clientIds: string[]): Promise<Record<s
   const map: Record<string, string> = {};
   for (const row of data ?? []) {
     if (!map[row.client_id]) map[row.client_id] = row.created_at;
+  }
+  return map;
+}
+
+export async function getLastCheckInScores(clientIds: string[]): Promise<Record<string, number>> {
+  if (clientIds.length === 0) return {};
+  const { data } = await supabase
+    .from('check_ins')
+    .select('client_id, pain_level, created_at')
+    .in('client_id', clientIds)
+    .order('created_at', { ascending: false });
+  const map: Record<string, number> = {};
+  for (const row of data ?? []) {
+    if (!(row.client_id in map) && row.pain_level != null) {
+      map[row.client_id] = row.pain_level;
+    }
   }
   return map;
 }
@@ -280,7 +297,8 @@ export async function fireContactProfessionalWebhook(
   practitionerId: string,
   clientName: string,
   symptomDescription: string,
-  symptomScore: number
+  symptomScore: number,
+  clientEmail?: string
 ): Promise<void> {
   let settings = await getWebhookSettings(practitionerId);
   // Fall back to admin's webhook if the assigned practitioner has none configured
@@ -303,6 +321,7 @@ export async function fireContactProfessionalWebhook(
     body: JSON.stringify({
       type: 'contact_professional',
       client_name: clientName,
+      client_email: clientEmail ?? '',
       symptom_description: symptomDescription,
       symptom_score: symptomScore,
       practitioner_id: practitionerId,
@@ -626,26 +645,6 @@ export async function sendClientInvitation(
   }
 }
 
-const CHECK_IN_WEBHOOK_URL = 'https://hook.eu2.make.com/671seik11jnwfdb99uysb3dlp3mqz7kl';
-
-export async function fireCheckInWebhook(
-  practitionerId: string,
-  clientName: string,
-  clientEmail: string
-): Promise<void> {
-  await fetch(CHECK_IN_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'check_in_reminder',
-      client_name: clientName,
-      client_email: clientEmail,
-      practitioner_id: practitionerId,
-      timestamp: new Date().toISOString(),
-    }),
-  }).catch(() => {});
-}
-
 export async function getClinicalStats(practitionerId: string, isAdmin: boolean) {
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const today = new Date();
@@ -684,6 +683,28 @@ export async function getClinicalStats(practitionerId: string, isAdmin: boolean)
     avgPainLevel: Math.round(avgPain * 10) / 10,
     checkInsByDay: byDay,
   };
+}
+
+const CHECK_IN_WEBHOOK_URL = 'https://hook.eu2.make.com/671seik11jnwfdb99uysb3dlp3mqz7kl';
+
+export async function fireCheckInWebhook(
+  practitionerId: string,
+  clientName: string,
+  clientEmail: string,
+  clientPhone?: string | null
+): Promise<void> {
+  await fetch(CHECK_IN_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'check_in_reminder',
+      client_name: clientName,
+      client_email: clientEmail,
+      client_phone: clientPhone ?? '',
+      practitioner_id: practitionerId,
+      timestamp: new Date().toISOString(),
+    }),
+  }).catch(() => {});
 }
 
 export async function getDeviceVisits(clientId?: string): Promise<DeviceVisit[]> {
