@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useClientContext } from '../context/ClientContext';
-import { createCheckIn, getSymptoms, createSymptomEntry, createSymptom, createContactRequest, fireContactProfessionalWebhook, fireCheckInWebhook } from '../lib/store';
+import { createCheckIn, getSymptoms, createSymptomEntry, createSymptom, createContactRequest, fireContactProfessionalWebhook, fireCheckInWebhook, getClient } from '../lib/store';
 import { getLoggedInClientId } from '../hooks/useClient';
 import { analyzeSymptomRealTime } from '../lib/symptomAnalysis';
 import { supabase } from '../lib/supabase';
@@ -119,14 +119,14 @@ export default function CheckInPage() {
               null, null, null, 'urgent', 'keyword_only'
             );
             await fireContactProfessionalWebhook(
-              client.practitioner_id, client.full_name ?? '', msg, painLevel
+              client.practitioner_id, client.full_name ?? '', msg, painLevel, client.email ?? ''
             );
           }
         } catch { /* never block success */ }
       }
-      await refreshClient();
-      if (client?.practitioner_id) {
-        fireCheckInWebhook(client.practitioner_id, client.full_name, client.email).catch(() => {});
+      const [freshClient] = await Promise.all([getClient(clientId!), refreshClient()]);
+      if (freshClient?.practitioner_id) {
+        fireCheckInWebhook(freshClient.practitioner_id, freshClient.full_name, freshClient.email, freshClient.phone, freshClient.primary_complaint).catch(() => {});
       }
       setStep('done');
     } catch {

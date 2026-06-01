@@ -691,7 +691,8 @@ export async function fireCheckInWebhook(
   practitionerId: string,
   clientName: string,
   clientEmail: string,
-  clientPhone?: string | null
+  clientPhone?: string | null,
+  clientSymptom?: string | null
 ): Promise<void> {
   await fetch(CHECK_IN_WEBHOOK_URL, {
     method: 'POST',
@@ -701,6 +702,7 @@ export async function fireCheckInWebhook(
       client_name: clientName,
       client_email: clientEmail,
       client_phone: clientPhone ?? '',
+      client_symptom: clientSymptom ?? '',
       practitioner_id: practitionerId,
       timestamp: new Date().toISOString(),
     }),

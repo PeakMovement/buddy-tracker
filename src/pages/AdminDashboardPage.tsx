@@ -291,7 +291,7 @@ export default function AdminDashboardPage() {
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
-                      await fireCheckInWebhook(practitionerId, client.full_name, client.email);
+                      await fireCheckInWebhook(practitionerId, client.full_name, client.email, (client as any).phone, client.primary_complaint);
                       setSentCheckIns((prev) => ({ ...prev, [client.id]: true }));
                       setTimeout(() => setSentCheckIns((prev) => ({ ...prev, [client.id]: false })), 2000);
                     }}
