@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getLoggedInPractitionerId } from '../hooks/usePractitioner';
-import { getPractitioner, getClients, getPractitioners, getLastCheckInDates, fireCheckInWebhook } from '../lib/store';
+import { getPractitioner, getClients, getPractitioners, getLastCheckInDates, getLastCheckInScores, fireCheckInWebhook } from '../lib/store';
 import type { Client, Practitioner } from '../types/database';
 import { formatDate, formatRelativeDate } from '../lib/utils';
 import { ChevronRight, User, Search } from 'lucide-react';
@@ -40,6 +40,7 @@ export default function AdminDashboardPage() {
   const [practitioner, setPractitioner] = useState<Practitioner | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [lastCheckIns, setLastCheckIns] = useState<Record<string, string>>({});
+  const [lastPainScores, setLastPainScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [checkInFilter, setCheckInFilter] = useState<CheckInFilter>('all');
   const [sentCheckIns, setSentCheckIns] = useState<Record<string, boolean>>({});
@@ -60,8 +61,12 @@ export default function AdminDashboardPage() {
         list = await getClients(practitionerId);
       }
       setClients(list);
-      const dates = await getLastCheckInDates(list.map((c) => c.id));
+      const [dates, scores] = await Promise.all([
+        getLastCheckInDates(list.map((c) => c.id)),
+        getLastCheckInScores(list.map((c) => c.id)),
+      ]);
       setLastCheckIns(dates);
+      setLastPainScores(scores);
       setLoading(false);
     })();
   }, [practitionerId]);
@@ -204,6 +209,7 @@ export default function AdminDashboardPage() {
         <div className="client-list">
           {filtered.map((client) => {
             const lastCheckIn = lastCheckIns[client.id];
+            const painScore = lastPainScores[client.id];
             const overdue = isOverdue(client, lastCheckIn);
             return (
               <div
@@ -258,9 +264,28 @@ export default function AdminDashboardPage() {
                   {client.next_appointment && (
                     <span>Next: {formatDate(client.next_appointment)}</span>
                   )}
-                  <span style={{ color: lastCheckIn ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
+                  <span style={{ color: lastCheckIn ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                     Last check-in: <strong>{lastCheckIn ? formatRelativeDate(lastCheckIn) : 'Never'}</strong>
                   </span>
+                  {painScore != null && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      whiteSpace: 'nowrap',
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.01em',
+                      ...(painScore <= 3
+                        ? { background: '#dcfce7', color: '#16a34a' }
+                        : painScore <= 6
+                        ? { background: '#fef9c3', color: '#ca8a04' }
+                        : { background: '#fee2e2', color: '#dc2626' }),
+                    }}>
+                      {painScore}/10
+                    </span>
+                  )}
                 </div>
                 <div style={{ marginTop: '10px' }}>
                   <button
